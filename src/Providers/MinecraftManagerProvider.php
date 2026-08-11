@@ -2,9 +2,12 @@
 
 namespace FyWolf\MinecraftManager\Providers;
 
+use App\Models\ApiKey;
 use App\Models\Egg;
 use App\Models\Role;
+use FyWolf\MinecraftManager\Http\Controllers\Api\AddonController;
 use FyWolf\MinecraftManager\Console\Commands\PruneStalePackInstallsCommand;
+use FyWolf\MinecraftManager\Console\Commands\ReconcileAddonsCommand;
 use FyWolf\MinecraftManager\Integrations\Content\ContentProviderRegistry;
 use FyWolf\MinecraftManager\Integrations\Content\CurseForgeProvider;
 use FyWolf\MinecraftManager\Integrations\Content\ModrinthProvider;
@@ -17,6 +20,7 @@ use FyWolf\MinecraftManager\Models\CapabilityProfile;
 use FyWolf\MinecraftManager\Models\EggCapabilityProfile;
 use FyWolf\MinecraftManager\Support\CapabilityResolver;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\ServiceProvider;
 
@@ -33,12 +37,26 @@ use Illuminate\Support\ServiceProvider;
  */
 class MinecraftManagerProvider extends ServiceProvider
 {
+    /**
+     * This plugin's own application-ACL resource.
+     *
+     * Separate from the billing bridge's `billing`, because these routes claim
+     * ports and therefore consume node capacity — a capability worth granting
+     * independently of "provision game servers".
+     */
+    public const RESOURCE_NAME = 'minecraft';
+
     public function register(): void
     {
+        ApiKey::registerCustomResourceName(self::RESOURCE_NAME);
+
         // Makes `mc_capability_profile` a first-class model permission, so admin
         // roles can be granted profile management without full panel access.
         Role::registerCustomDefaultPermissions('mc_capability_profile');
         Role::registerCustomModelIcon('mc_capability_profile', 'tabler-cube');
+
+        Role::registerCustomDefaultPermissions('mc_addon');
+        Role::registerCustomModelIcon('mc_addon', 'tabler-puzzle');
 
         // Singleton so the per-egg memo survives across the several components
         // that each ask "what can this server do?" while rendering one page.
@@ -76,6 +94,27 @@ class MinecraftManagerProvider extends ServiceProvider
         $this->registerEggRelation();
         $this->registerActivityStrings();
         $this->registerSchedule();
+        $this->registerRoutes();
+    }
+
+    /**
+     * The endpoints the billing service calls.
+     *
+     * The withoutMiddleware() list is mandatory boilerplate for a panel API
+     * route: without it the global `web` group and CSRF verification apply, and
+     * token authentication simply does not work.
+     */
+    private function registerRoutes(): void
+    {
+        Route::prefix('api/application/minecraft')
+            ->middleware(['auth:sanctum', 'throttle:120,1'])
+            ->withoutMiddleware(['web', 'auth', 'verify-csrf-token', 'App\Http\Middleware\VerifyCsrfToken'])
+            ->group(function () {
+                Route::get('/addons', [AddonController::class, 'catalogue'])->name('minecraft-manager.api.catalogue');
+                Route::post('/addons', [AddonController::class, 'store'])->name('minecraft-manager.api.grant');
+                Route::delete('/addons', [AddonController::class, 'destroy'])->name('minecraft-manager.api.revoke');
+                Route::get('/servers/{server}/addons', [AddonController::class, 'index'])->name('minecraft-manager.api.list');
+            });
     }
 
     /**
@@ -88,6 +127,14 @@ class MinecraftManagerProvider extends ServiceProvider
         $this->app->booted(function () {
             Schedule::command(PruneStalePackInstallsCommand::class)
                 ->hourly()
+                ->withoutOverlapping();
+
+            // Most mods write their config on first start, so an addon's port
+            // usually cannot be written in until the customer has run the
+            // server once. This finishes the job, and reclaims ports from
+            // installs that died mid-provision.
+            Schedule::command(ReconcileAddonsCommand::class)
+                ->everyTenMinutes()
                 ->withoutOverlapping();
         });
     }
@@ -142,6 +189,11 @@ class MinecraftManagerProvider extends ServiceProvider
             'activity.server.minecraft.modpack-install-finish' => 'Finished installing the modpack <b>:pack</b> — :installed of :total files',
             'activity.server.minecraft.modpack-install-failed' => 'Failed to install the modpack <b>:pack</b>: :error',
             'activity.server.minecraft.modpack-install-cancel' => 'Cancelled the modpack install <b>:pack</b>',
+            'activity.server.minecraft.addon-install' => 'Installed the addon <b>:addon</b> on port <b>:port</b>',
+            'activity.server.minecraft.addon-port-set' => 'Set <b>:addon</b> to listen on port <b>:port</b> in <b>:file</b>',
+            'activity.server.minecraft.addon-revoke' => 'Withdrew the addon <b>:addon</b> and released port <b>:port</b>',
+            'activity.server.minecraft.addon-uninstall' => 'Removed the addon <b>:addon</b>',
+            'activity.server.minecraft.addon-failed' => 'Failed to install the addon <b>:addon</b>: :error',
         ], 'en');
     }
 }

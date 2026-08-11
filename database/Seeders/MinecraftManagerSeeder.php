@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\Egg;
 use Exception;
+use FyWolf\MinecraftManager\Models\Addon;
 use FyWolf\MinecraftManager\Models\CapabilityProfile;
 use FyWolf\MinecraftManager\Models\EggCapabilityProfile;
 use FyWolf\MinecraftManager\Support\CapabilityResolver;
@@ -52,6 +53,124 @@ class MinecraftManagerSeeder extends Seeder
         $this->mapStockEggs($profiles);
 
         $this->mapRemainingEggs($profiles);
+
+        $this->seedAddons();
+    }
+
+    /**
+     * The addon catalogue.
+     *
+     * Every one of these claims a port, which is the whole reason they are
+     * sellable: a port is finite on a node. The `port_patch` recipe says where
+     * each mod keeps its port, because they all disagree — a .properties file,
+     * two flavours of "a line somewhere", and a nested YAML key.
+     *
+     * `firstOrCreate` on key, so an admin's edits to name, price flag or
+     * project id survive a plugin update.
+     */
+    private function seedAddons(): void
+    {
+        $addons = [
+            [
+                'key' => 'bluemap',
+                'name' => 'BlueMap',
+                'description' => 'A 3D web map of your world, rendered live and viewable in a browser.',
+                'icon' => 'tabler-map',
+                'provider' => 'modrinth',
+                'project_id' => 'swbUV1cr',
+                'loaders' => ['paper', 'purpur', 'folia', 'fabric', 'forge', 'neoforge'],
+                'needs_port' => true,
+                'port_protocol' => 'tcp',
+                // HOCON. The key is unique in the file, so a plain line match is safe.
+                'port_patch' => [
+                    'format' => 'line',
+                    'key' => 'port',
+                    'paths' => ['bluemap/webserver.conf', 'config/bluemap/webserver.conf'],
+                ],
+                'free' => false,
+                'sort' => 10,
+            ],
+            [
+                'key' => 'simple-voice-chat',
+                'name' => 'Simple Voice Chat',
+                'description' => 'Proximity voice chat. Players hear each other based on how close they are in game.',
+                'icon' => 'tabler-microphone',
+                'provider' => 'modrinth',
+                'project_id' => '9eGKb6K1',
+                'loaders' => ['paper', 'purpur', 'folia', 'fabric', 'forge', 'neoforge', 'quilt'],
+                'needs_port' => true,
+                // UDP, unlike the web maps — worth being explicit about, since a
+                // firewall rule for one will not serve the other.
+                'port_protocol' => 'udp',
+                'port_patch' => [
+                    'format' => 'properties',
+                    'key' => 'port',
+                    'paths' => ['voicechat/voicechat-server.properties', 'config/voicechat/voicechat-server.properties'],
+                    // A .properties reader fills in every key it does not find,
+                    // so a one-line file is legitimate here.
+                    'stub' => "port=%PORT%\n",
+                ],
+                'free' => false,
+                'sort' => 20,
+            ],
+            [
+                'key' => 'dynmap',
+                'name' => 'Dynmap',
+                'description' => 'A Google-Maps-style live view of your world in a browser.',
+                'icon' => 'tabler-map-2',
+                'provider' => 'modrinth',
+                'project_id' => 'fRQREgAc',
+                'loaders' => ['paper', 'purpur', 'fabric', 'forge', 'neoforge'],
+                'needs_port' => true,
+                'port_protocol' => 'tcp',
+                'port_patch' => [
+                    'format' => 'line',
+                    'key' => 'webserver-port',
+                    'paths' => ['plugins/dynmap/configuration.txt', 'config/dynmap/configuration.txt', 'dynmap/configuration.txt'],
+                ],
+                'free' => false,
+                'sort' => 30,
+            ],
+            [
+                'key' => 'geyser',
+                'name' => 'Geyser',
+                'description' => 'Lets Minecraft: Bedrock players — phones, consoles, Windows 10 — join your Java server.',
+                'icon' => 'tabler-device-gamepad',
+                'provider' => 'modrinth',
+                'project_id' => 'wKkoqHrH',
+                'loaders' => ['paper', 'purpur', 'folia', 'fabric', 'neoforge', 'velocity', 'bungeecord'],
+                'needs_port' => true,
+                'port_protocol' => 'udp',
+                // The one that needs a section: `port:` appears under both
+                // `bedrock:` and `remote:`, and patching the wrong one silently
+                // repoints the Java listener.
+                'port_patch' => [
+                    'format' => 'yaml_section',
+                    'section' => 'bedrock',
+                    'key' => 'port',
+                    'paths' => [
+                        'plugins/Geyser-Spigot/config.yml',
+                        'config/Geyser-Fabric/config.yml',
+                        'config/Geyser-NeoForge/config.yml',
+                        'plugins/Geyser-Velocity/config.yml',
+                        'plugins/Geyser-BungeeCord/config.yml',
+                    ],
+                ],
+                'free' => false,
+                'sort' => 40,
+            ],
+        ];
+
+        foreach ($addons as $addon) {
+            try {
+                Addon::firstOrCreate(['key' => $addon['key']], $addon);
+            } catch (Exception $exception) {
+                Log::warning('minecraft-manager: could not seed addon', [
+                    'addon' => $addon['key'],
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
     }
 
     /**

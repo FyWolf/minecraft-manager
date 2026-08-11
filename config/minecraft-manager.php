@@ -118,7 +118,7 @@ return [
         'vanilla' => [
             'name' => 'Vanilla',
             'loader' => 'vanilla',
-            'capabilities' => ['worlds', 'configs', 'versions', 'datapacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'datapacks', 'addons'],
             'content_dir' => null,
             'worlds_dir' => '/',
             'dimension_layout' => 'vanilla',
@@ -131,7 +131,7 @@ return [
         'paper' => [
             'name' => 'Paper / Bukkit',
             'loader' => 'paper',
-            'capabilities' => ['worlds', 'configs', 'versions', 'plugins', 'datapacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'plugins', 'datapacks', 'addons'],
             'content_dir' => 'plugins',
             'worlds_dir' => '/',
             'dimension_layout' => 'bukkit',
@@ -144,7 +144,7 @@ return [
         'purpur' => [
             'name' => 'Purpur',
             'loader' => 'purpur',
-            'capabilities' => ['worlds', 'configs', 'versions', 'plugins', 'datapacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'plugins', 'datapacks', 'addons'],
             'content_dir' => 'plugins',
             'worlds_dir' => '/',
             'dimension_layout' => 'bukkit',
@@ -157,7 +157,7 @@ return [
         'folia' => [
             'name' => 'Folia',
             'loader' => 'folia',
-            'capabilities' => ['worlds', 'configs', 'versions', 'plugins'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'plugins', 'addons'],
             'content_dir' => 'plugins',
             'worlds_dir' => '/',
             'dimension_layout' => 'bukkit',
@@ -170,7 +170,7 @@ return [
         'fabric' => [
             'name' => 'Fabric',
             'loader' => 'fabric',
-            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks', 'datapacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks', 'datapacks', 'addons'],
             'content_dir' => 'mods',
             'worlds_dir' => '/',
             'dimension_layout' => 'vanilla',
@@ -183,7 +183,7 @@ return [
         'quilt' => [
             'name' => 'Quilt',
             'loader' => 'quilt',
-            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks', 'datapacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks', 'datapacks', 'addons'],
             'content_dir' => 'mods',
             'worlds_dir' => '/',
             'dimension_layout' => 'vanilla',
@@ -200,7 +200,7 @@ return [
             // *installer* jar, not a runnable server jar, so a jar swap would
             // produce a server that cannot boot. Version changes go through
             // variable + reinstall and let the egg's install script do it.
-            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks', 'addons'],
             'content_dir' => 'mods',
             'worlds_dir' => '/',
             'dimension_layout' => 'vanilla',
@@ -213,7 +213,7 @@ return [
         'neoforge' => [
             'name' => 'NeoForge',
             'loader' => 'neoforge',
-            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks'],
+            'capabilities' => ['worlds', 'configs', 'versions', 'mods', 'modpacks', 'resourcepacks', 'addons'],
             'content_dir' => 'mods',
             'worlds_dir' => '/',
             'dimension_layout' => 'vanilla',
@@ -227,7 +227,7 @@ return [
             'name' => 'Velocity (proxy)',
             'loader' => 'velocity',
             // A proxy has no worlds and no server.properties.
-            'capabilities' => ['configs', 'versions', 'plugins'],
+            'capabilities' => ['configs', 'versions', 'plugins', 'addons'],
             'content_dir' => 'plugins',
             'worlds_dir' => null,
             'dimension_layout' => 'vanilla',
@@ -240,7 +240,7 @@ return [
         'bungeecord' => [
             'name' => 'BungeeCord / Waterfall (proxy)',
             'loader' => 'bungeecord',
-            'capabilities' => ['configs', 'versions', 'plugins'],
+            'capabilities' => ['configs', 'versions', 'plugins', 'addons'],
             'content_dir' => 'plugins',
             'worlds_dir' => null,
             'dimension_layout' => 'vanilla',
@@ -400,6 +400,25 @@ return [
             ['min_mc' => '1.17', 'java' => 16],
             ['min_mc' => '1.0', 'java' => 8],
         ],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Addons
+    |---------------------------------------------------------------------------
+    |
+    | Entitlement for a paid addon comes from the billing app, which pushes it
+    | to POST /api/application/minecraft/addons with an application API key
+    | holding the `minecraft` resource. Nothing here ever calls billing back —
+    | putting it on the critical path of a page render would mean a billing
+    | outage takes these pages down too.
+    |
+    */
+
+    'addons' => [
+        // Where "Get it" sends a customer. Receives ?server=<uuid>&addon=<key>.
+        // Blank hides the button rather than linking nowhere.
+        'store_url' => env('MCM_ADDON_STORE_URL', ''),
     ],
 
     /*

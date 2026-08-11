@@ -22,6 +22,7 @@ enum Capability: string implements HasLabel
     case Modpacks = 'modpacks';
     case ResourcePacks = 'resourcepacks';
     case Datapacks = 'datapacks';
+    case Addons = 'addons';
 
     public function getLabel(): string
     {
@@ -34,6 +35,7 @@ enum Capability: string implements HasLabel
             self::Modpacks => 'Modpacks',
             self::ResourcePacks => 'Resource packs',
             self::Datapacks => 'Datapacks',
+            self::Addons => 'Addons',
         };
     }
 
@@ -48,6 +50,7 @@ enum Capability: string implements HasLabel
             self::Modpacks => 'Install a whole modpack, resolving every file.',
             self::ResourcePacks => 'Browse and install resource packs.',
             self::Datapacks => 'Browse and install datapacks into a world.',
+            self::Addons => 'One-click extras such as BlueMap, some of which claim an extra port.',
         };
     }
 

@@ -12,6 +12,7 @@ return [
             'both' => 'Mods & Plugins',
         ],
         'modpacks' => 'Modpacks',
+        'addons' => 'Addons',
     ],
 
     'profile' => [
