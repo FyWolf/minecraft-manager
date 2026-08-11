@@ -381,9 +381,14 @@ class ConfigsPage extends ServerFormPage
     }
 
     /**
+     * Public, not protected: InteractsWithFormActions declares this public, and
+     * PHP forbids narrowing an inherited method's visibility. Doing so is a
+     * fatal at class-load time, which in a panel means boot, which means the
+     * whole panel — not just this page.
+     *
      * @return array<int, Action>
      */
-    protected function getFormActions(): array
+    public function getFormActions(): array
     {
         return [
             Action::make('save')

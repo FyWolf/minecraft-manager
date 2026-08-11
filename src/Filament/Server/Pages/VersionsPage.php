@@ -430,9 +430,12 @@ class VersionsPage extends ServerFormPage
      * The page has no plain "save" — both paths are explicit, confirmed
      * actions, so the form's own submit button would be meaningless.
      *
+     * Public, not protected: InteractsWithFormActions declares this public and
+     * PHP forbids narrowing inherited visibility, fatally, at class-load time.
+     *
      * @return array<int, Action>
      */
-    protected function getFormActions(): array
+    public function getFormActions(): array
     {
         return [];
     }

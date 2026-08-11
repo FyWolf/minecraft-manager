@@ -33,13 +33,22 @@ Two checks, both runnable without a panel install (the second needs one):
 
 ```
 php tests/PropertiesFileTest.php                  # 41 round-trip assertions
-php tests/verify-imports.php /path/to/panel       # every `use` resolves
+php tests/verify-imports.php   /path/to/panel     # every `use` resolves
+php tests/verify-overrides.php /path/to/panel     # no narrowed inherited methods
 ```
 
-The second is worth more than it looks. A mistyped namespace in a Pelican plugin fails
-*silently* — `PluginService` catches the exception, flips the plugin to Errored and moves
-on — so the symptom is a plugin that simply does not appear. This resolves every import
-against a real panel's autoloader in about a second.
+**Run all three before installing a build on a panel.** Each catches a failure mode that
+`php -l` cannot see, and both of the last two catch faults that are invisible until a
+panel boots:
+
+- A **mistyped namespace** fails silently. `PluginService` catches the exception, flips the
+  plugin to Errored and moves on, so the symptom is a plugin that simply does not appear.
+- **Narrowing an inherited method's visibility** — `protected function getFormActions()`
+  over a trait's `public` one — is a fatal at *class-load* time. In a panel that is boot,
+  so it does not break one page: it takes the entire panel down, and the error page itself
+  fails to render (`No hint path defined for [filament]`) because Filament never got far
+  enough to register its view namespace. `verify-overrides.php` deliberately does not
+  autoload plugin classes, since doing so would hit the very fatal it reports.
 
 ## Releasing
 

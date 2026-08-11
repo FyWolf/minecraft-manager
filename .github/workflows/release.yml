@@ -47,6 +47,11 @@ jobs:
       - name: Run tests
         run: php tests/PropertiesFileTest.php
 
+      # Catches syntax errors the other checks cannot: these files are only ever
+      # loaded by a running panel, so a parse error ships silently.
+      - name: Lint
+        run: find src database tests -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+
       - name: Work out the next version
         id: version
         run: |
