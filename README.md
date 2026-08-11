@@ -12,20 +12,20 @@ An egg nobody has mapped shows nothing rather than a broken page.
 
 ## Status
 
-Under construction. What is in the box today:
+Feature-complete and **not yet tested against a live panel.** Every page is written, every
+import resolves against a real panel's autoloader, and the `.properties` parser has 41
+passing round-trip tests — but nothing here has been exercised against a running Wings
+daemon. Treat the first install as a shakedown, on a server you do not mind breaking.
 
 | Feature | State |
 |---|---|
-| Per-egg capability profiles, admin UI, egg auto-detection | **built** |
-| Worlds — list, archive, restore, switch active, delete/reset | **built** |
-| Configuration — typed `server.properties` editor, EULA | **built** |
-| Mod / plugin browser (Modrinth), with dependency resolution | **built** |
-| Mod / plugin browser (CurseForge) | **built** |
-| Version switching (jar swap + reinstall) | **built** |
-| Modpack installs | planned |
-
-The section below describing modpacks documents the intended design; that page does not
-render yet.
+| Per-egg capability profiles, admin UI, egg auto-detection | built |
+| Worlds — list, archive, restore, switch active, delete/reset | built |
+| Configuration — typed `server.properties` editor, EULA | built |
+| Mod / plugin browser (Modrinth), with dependency resolution | built |
+| Mod / plugin browser (CurseForge) | built |
+| Version switching (jar swap + reinstall) | built |
+| Modpack installs (queued, with progress) | built |
 
 ## Developing
 

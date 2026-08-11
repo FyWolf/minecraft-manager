@@ -4,6 +4,7 @@ namespace FyWolf\MinecraftManager\Providers;
 
 use App\Models\Egg;
 use App\Models\Role;
+use FyWolf\MinecraftManager\Console\Commands\PruneStalePackInstallsCommand;
 use FyWolf\MinecraftManager\Integrations\Content\ContentProviderRegistry;
 use FyWolf\MinecraftManager\Integrations\Content\CurseForgeProvider;
 use FyWolf\MinecraftManager\Integrations\Content\ModrinthProvider;
@@ -16,6 +17,7 @@ use FyWolf\MinecraftManager\Models\CapabilityProfile;
 use FyWolf\MinecraftManager\Models\EggCapabilityProfile;
 use FyWolf\MinecraftManager\Support\CapabilityResolver;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\ServiceProvider;
 
 /**
@@ -73,6 +75,21 @@ class MinecraftManagerProvider extends ServiceProvider
     {
         $this->registerEggRelation();
         $this->registerActivityStrings();
+        $this->registerSchedule();
+    }
+
+    /**
+     * Without this, one `queue:restart` during a deploy permanently locks a
+     * server out of modpack installs: the abandoned row stays non-terminal and
+     * the one-install-per-server guard refuses everything afterwards.
+     */
+    private function registerSchedule(): void
+    {
+        $this->app->booted(function () {
+            Schedule::command(PruneStalePackInstallsCommand::class)
+                ->hourly()
+                ->withoutOverlapping();
+        });
     }
 
     /**
