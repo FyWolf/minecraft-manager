@@ -41,6 +41,35 @@ The second is worth more than it looks. A mistyped namespace in a Pelican plugin
 on — so the symptom is a plugin that simply does not appear. This resolves every import
 against a real panel's autoloader in about a second.
 
+## Releasing
+
+Automatic. Merging to `main` cuts a release — there is nothing to run by hand and the
+version is never edited manually.
+
+The bump level comes from the commit messages since the last tag:
+
+| Commit prefix | Bump |
+|---|---|
+| `feat!:` or a `BREAKING CHANGE` body | major |
+| `feat:` | minor |
+| anything else (`fix:`, `chore:`, `docs:`, …) | patch |
+
+The workflow then writes the new version into `plugin.json` and `updater.json`, commits it
+as `github-actions[bot]` with `[skip ci]`, tags `v<version>`, builds `minecraft-manager.zip`
+and publishes the release. Tests run first and block the release if they fail.
+
+Both URLs — `plugin.json.update_url` and `updater.json.download_url` — are rewritten from
+the repository context on every release rather than trusted from the file, so they stay
+correct whichever organisation this lives under and cannot silently point a customer's
+panel at another repository's releases after a rename or fork.
+
+To force a specific version (the first release, or a correction), run the workflow
+manually from the Actions tab and give it an explicit version.
+
+Note the loop that isn't: the bot's own bump commit pushes to `main`, but pushes made with
+`GITHUB_TOKEN` do not trigger workflows, and the `[skip ci]` marker guards the case where
+that token is ever swapped for a PAT.
+
 ---
 
 ## Why the gating is a database table
