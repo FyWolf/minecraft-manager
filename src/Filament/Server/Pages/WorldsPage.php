@@ -53,6 +53,8 @@ class WorldsPage extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'tabler-world';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Minecraft';
+
     protected static ?string $slug = 'mc-worlds';
 
     protected static ?int $navigationSort = 21;

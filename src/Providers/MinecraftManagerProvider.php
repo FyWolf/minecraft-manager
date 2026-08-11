@@ -135,6 +135,7 @@ class MinecraftManagerProvider extends ServiceProvider
             'activity.server.minecraft.eula-accept' => 'Accepted the Minecraft EULA',
             'activity.server.minecraft.content-install' => 'Installed <b>:name</b> (:version) from :provider into <b>:directory</b>',
             'activity.server.minecraft.content-delete' => 'Removed <b>:name</b> from <b>:directory</b>',
+            'activity.server.minecraft.content-toggle' => 'Renamed <b>:name</b> in <b>:directory</b> to enable or disable it',
             'activity.server.minecraft.version-change' => 'Changed the server version to <b>:version</b> (:mode)',
             'activity.server.minecraft.modpack-install-start' => 'Started installing the modpack <b>:pack</b> (:version)',
             'activity.server.minecraft.modpack-install-finish' => 'Finished installing the modpack <b>:pack</b> — :installed of :total files',

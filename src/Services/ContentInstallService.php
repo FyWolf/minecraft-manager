@@ -222,6 +222,27 @@ class ContentInstallService
      */
     public function installedCount(Server $server, ResolvedProfile $profile): ?int
     {
+        $installed = $this->installed($server, $profile);
+
+        return $installed === null ? null : count($installed);
+    }
+
+    /**
+     * What is actually in the mods or plugins directory right now.
+     *
+     * Deliberately reports what is on disk rather than what this plugin
+     * remembers installing: mods arrive by SFTP, inside modpacks, and from
+     * whatever the customer was using before they moved to this panel. A list
+     * that only knew about its own installs would be wrong on every real
+     * server.
+     *
+     * Returns null when the directory cannot be read at all, which is different
+     * from an empty directory and is surfaced differently in the UI.
+     *
+     * @return array<string, array<string, mixed>>|null
+     */
+    public function installed(Server $server, ResolvedProfile $profile): ?array
+    {
         if (! $profile->contentDir) {
             return null;
         }
@@ -236,14 +257,102 @@ class ContentInstallService
             return null;
         }
 
-        $count = 0;
+        $files = [];
 
         foreach ($entries as $entry) {
-            if (is_array($entry) && ! empty($entry['file']) && str_ends_with(strtolower((string) ($entry['name'] ?? '')), '.jar')) {
-                $count++;
+            if (! is_array($entry) || empty($entry['file'])) {
+                continue;
             }
+
+            $name = (string) ($entry['name'] ?? '');
+            $lower = strtolower($name);
+
+            // `.jar.disabled` is the near-universal convention for a mod turned
+            // off without deleting it, and it belongs in this list.
+            $isJar = str_ends_with($lower, '.jar');
+            $isDisabled = str_ends_with($lower, '.jar.disabled') || str_ends_with($lower, '.disabled');
+
+            if (! $isJar && ! $isDisabled) {
+                continue;
+            }
+
+            $files[$name] = [
+                'name' => $name,
+                'guess' => $this->guessProjectName($name),
+                'size' => (int) ($entry['size'] ?? 0),
+                'modified_at' => $entry['modified'] ?? null,
+                'disabled' => $isDisabled,
+            ];
         }
 
-        return $count;
+        uasort($files, fn (array $a, array $b) => strcasecmp($a['name'], $b['name']));
+
+        return $files;
+    }
+
+    /**
+     * Guess a searchable project name from a jar filename.
+     *
+     * Presented as a search term, never as an identification. Doing this
+     * properly would mean hashing each jar and asking Modrinth's
+     * /version_file/{sha1} endpoint, but the daemon exposes no hash and
+     * streaming every jar through the panel to compute one would be far more
+     * expensive than the feature is worth.
+     */
+    public function guessProjectName(string $filename): string
+    {
+        $name = preg_replace('/\.(jar|disabled)$/i', '', $filename) ?? $filename;
+        $name = preg_replace('/\.jar$/i', '', $name) ?? $name;
+
+        // Cut at the first version-looking token: "sodium-fabric-0.5.8+mc1.20.4"
+        // becomes "sodium fabric".
+        $name = preg_split('/[-_+]v?\d/', $name)[0] ?? $name;
+
+        // Drop loader and platform noise that would skew a search.
+        $name = preg_replace('/\b(fabric|forge|neoforge|quilt|bukkit|spigot|paper|mc|minecraft)\b/i', ' ', $name) ?? $name;
+
+        $name = trim((string) preg_replace('/[-_.]+/', ' ', $name));
+
+        return $name !== '' ? $name : $filename;
+    }
+
+    /**
+     * Delete a file from the content directory.
+     */
+    public function deleteInstalled(Server $server, ResolvedProfile $profile, string $filename): void
+    {
+        $directory = DaemonDirs::join($profile->contentDir);
+
+        $this->repository->setServer($server)->deleteFiles($directory, [$filename]);
+
+        Activity::event('server:minecraft.content-delete')
+            ->property(['name' => $filename, 'directory' => $directory])
+            ->log();
+    }
+
+    /**
+     * Turn a mod off without deleting it, by renaming to `.disabled`.
+     *
+     * Every loader ignores files that do not end in `.jar`, so this is the
+     * standard way to bisect a crash without losing the file — and it is
+     * reversible, which deletion is not.
+     */
+    public function toggleInstalled(Server $server, ResolvedProfile $profile, string $filename, bool $disable): string
+    {
+        $directory = DaemonDirs::join($profile->contentDir);
+
+        $target = $disable
+            ? $filename . '.disabled'
+            : (string) preg_replace('/\.disabled$/i', '', $filename);
+
+        $this->repository->setServer($server)->renameFiles($directory, [
+            ['from' => $filename, 'to' => $target],
+        ]);
+
+        Activity::event('server:minecraft.content-toggle')
+            ->property(['name' => $filename, 'enabled' => ! $disable, 'directory' => $directory])
+            ->log();
+
+        return $target;
     }
 }

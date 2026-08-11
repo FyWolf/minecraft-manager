@@ -52,12 +52,11 @@ class ModpacksPage extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'tabler-box-seam';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Minecraft';
+
     protected static ?string $slug = 'mc-modpacks';
 
     protected static ?int $navigationSort = 25;
-
-    /** Only while an install is running — see getPollingInterval(). */
-    protected static ?string $pollingInterval = null;
 
     public ?string $provider = null;
 
@@ -93,15 +92,6 @@ class ModpacksPage extends Page implements HasTable
         abort_unless(user()?->can(SubuserPermission::FileRead, $this->server()), 403);
 
         $this->provider ??= app(ContentProviderRegistry::class)->default(ContentType::Modpack)?->key();
-    }
-
-    /**
-     * Poll only while something is actually running, so an idle page costs
-     * nothing.
-     */
-    public function getPollingInterval(): ?string
-    {
-        return $this->activeInstall() ? '3s' : null;
     }
 
     private function server(): Server
@@ -291,6 +281,12 @@ class ModpacksPage extends Page implements HasTable
             ->paginated([20])
             ->searchable()
             ->deferLoading()
+            // Refresh the whole page (and so the progress section above the
+            // table) only while an install is actually running; an idle page
+            // costs nothing. Table::poll() is the real mechanism — a static
+            // $pollingInterval property on a Page is not a Filament feature and
+            // silently does nothing.
+            ->poll(fn (): ?string => $this->activeInstall() ? '3s' : null)
             ->columns([
                 ImageColumn::make('icon_url')->label('')->circular(),
 

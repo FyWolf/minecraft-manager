@@ -4,19 +4,17 @@ namespace FyWolf\MinecraftManager\Filament\Server\Pages;
 
 use App\Enums\SubuserPermission;
 use App\Facades\Activity;
+use App\Filament\Server\Pages\ServerFormPage;
 use App\Filament\Server\Resources\Files\Pages\ListFiles;
 use App\Models\Server;
 use App\Repositories\Daemon\DaemonFileRepository;
-use App\Traits\Filament\BlockAccessInConflict;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
-use Filament\Forms\Concerns\InteractsWithForms;
-use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
-use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use FyWolf\MinecraftManager\Enums\Capability;
@@ -29,30 +27,31 @@ use Throwable;
 /**
  * Edit server.properties as a form.
  *
- * Two rules govern this page.
+ * Extends the panel's own ServerFormPage rather than a plain Page. That base
+ * class is what supplies `$this->form` (via InteractsWithForms), the `$data`
+ * state path, and the Blade view that actually renders and submits a form —
+ * a plain Page has `content()` and no form at all, which renders an empty page.
+ *
+ * Two rules govern what this does to the file.
  *
  * Nothing is ever dropped. Keys the schema does not know about — a future
- * Minecraft release, a fork's extra setting, a typo someone made by hand —
- * appear in a collapsed "Other settings" section as plain text inputs. They are
- * visible and editable, and they round-trip byte-for-byte if untouched, because
+ * Minecraft release, a fork's extra setting, a hand-written typo — appear in a
+ * collapsed "Other settings" section as plain text inputs. They are visible and
+ * editable, and they round-trip byte-for-byte if untouched, because
  * PropertiesFile rewrites individual lines rather than rebuilding the file.
  *
  * Nothing is ever logged that shouldn't be. `rcon.password` lives in this file,
  * so the activity entry records which keys changed and never their values.
  */
-class ConfigsPage extends Page implements HasForms
+class ConfigsPage extends ServerFormPage
 {
-    use BlockAccessInConflict;
-    use InteractsWithForms;
-
     protected static string|\BackedEnum|null $navigationIcon = 'tabler-adjustments';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Minecraft';
 
     protected static ?string $slug = 'mc-config';
 
     protected static ?int $navigationSort = 22;
-
-    /** @var array<string, mixed> */
-    public array $data = [];
 
     /** @var array<string, string> */
     public array $unknown = [];
@@ -88,29 +87,19 @@ class ConfigsPage extends Page implements HasForms
         return static::getNavigationLabel();
     }
 
-    public function mount(): void
+    protected function authorizeAccess(): void
     {
-        abort_unless(user()?->can(SubuserPermission::FileReadContent, $this->server()), 403);
-
-        $this->loadProperties();
-    }
-
-    private function server(): Server
-    {
-        /** @var Server $server */
-        $server = Filament::getTenant();
-
-        return $server;
+        abort_unless(user()?->can(SubuserPermission::FileReadContent, $this->getRecord()), 403);
     }
 
     private function profile(): ResolvedProfile
     {
-        return $this->profileMemo ??= app(CapabilityResolver::class)->for($this->server());
+        return $this->profileMemo ??= app(CapabilityResolver::class)->for($this->getRecord());
     }
 
     private function isRunning(): bool
     {
-        return ! $this->server()->retrieveStatus()->isOffline();
+        return ! $this->getRecord()->retrieveStatus()->isOffline();
     }
 
     /**
@@ -121,14 +110,20 @@ class ConfigsPage extends Page implements HasForms
         return (array) config('minecraft-manager.configs.properties_schema', []);
     }
 
-    private function loadProperties(): void
+    /**
+     * Read server.properties into the form.
+     *
+     * Overrides the parent, which fills the form with the Server model's own
+     * attributes — meaningless here, since none of these fields are columns.
+     */
+    protected function fillForm(): void
     {
-        $properties = app(WorldService::class)->readProperties($this->server());
+        $properties = app(WorldService::class)->readProperties($this->getRecord());
 
         if (! $properties) {
             $this->fileMissing = true;
-            $this->data = [];
             $this->unknown = [];
+            $this->form->fill([]);
 
             return;
         }
@@ -137,40 +132,40 @@ class ConfigsPage extends Page implements HasForms
         $this->fileMissing = false;
 
         $all = $properties->all();
-        $schema = $this->schemaDefinition();
+        $definition = $this->schemaDefinition();
 
         $data = [];
 
-        foreach ($schema as $key => $definition) {
+        foreach ($definition as $key => $spec) {
             $raw = $all[$key] ?? null;
 
-            $data[$this->fieldName($key)] = match ($definition['type'] ?? 'string') {
+            $data[$this->fieldName($key)] = match ($spec['type'] ?? 'string') {
                 'bool' => $raw === null
-                    ? (bool) ($definition['default'] ?? false)
+                    ? (bool) ($spec['default'] ?? false)
                     : in_array(strtolower($raw), ['true', '1', 'yes', 'on'], true),
-                'int' => $raw === null || $raw === '' ? ($definition['default'] ?? null) : (int) $raw,
-                default => $raw ?? (string) ($definition['default'] ?? ''),
+                'int' => $raw === null || $raw === '' ? ($spec['default'] ?? null) : (int) $raw,
+                default => $raw ?? (string) ($spec['default'] ?? ''),
             };
-        }
 
-        // A password is never echoed back into the browser. A blank submission
-        // therefore has to mean "unchanged" — see save().
-        foreach ($schema as $key => $definition) {
-            if (! empty($definition['sensitive'])) {
+            // A password is never echoed back to the browser, so a blank
+            // submission has to mean "unchanged" — see save().
+            if (! empty($spec['sensitive'])) {
                 $data[$this->fieldName($key)] = null;
             }
         }
 
-        $this->data = $data;
-        $this->unknown = array_diff_key($all, $schema);
+        $this->unknown = array_diff_key($all, $definition);
+
+        foreach ($this->unknown as $key => $value) {
+            $data['unknown'][$this->fieldName($key)] = $value;
+        }
 
         $this->form->fill($data);
     }
 
     /**
-     * Property keys contain dots (`rcon.port`), which Livewire would read as
-     * nested array paths, so they are flattened for the form and restored on
-     * save.
+     * Property keys contain dots (`rcon.port`), which Livewire reads as nested
+     * array paths, so they are flattened for the form and restored on save.
      */
     private function fieldName(string $key): string
     {
@@ -195,27 +190,43 @@ class ConfigsPage extends Page implements HasForms
             'rcon' => 'RCON',
         ];
 
-        $sections = [];
+        $components = [];
+
+        if ($this->fileMissing) {
+            $components[] = Section::make('No server.properties yet')
+                ->description('This server has not generated its configuration. Start it once, then come back.')
+                ->schema([
+                    Placeholder::make('missing_hint')
+                        ->label('')
+                        ->content('Minecraft writes server.properties on its first run.'),
+                ]);
+
+            return $schema->components($components)->statePath('data');
+        }
+
+        if ($this->isRunning()) {
+            $components[] = Section::make('The server is running')
+                ->description(trans('minecraft-manager::strings.server_running.warning'))
+                ->schema([]);
+        }
 
         foreach ($groups as $group => $label) {
             $fields = [];
 
             foreach ($definition as $key => $spec) {
-                if (($spec['group'] ?? null) !== $group) {
-                    continue;
+                if (($spec['group'] ?? null) === $group) {
+                    $fields[] = $this->buildField($key, $spec);
                 }
-
-                $fields[] = $this->buildField($key, $spec);
             }
 
             if ($fields !== []) {
-                $sections[] = Section::make($label)->columns(2)->schema($fields)->collapsible();
+                $components[] = Section::make($label)->columns(2)->schema($fields)->collapsible();
             }
         }
 
         // Everything the schema does not describe. Rendered, not discarded.
         if ($this->unknown !== []) {
-            $sections[] = Section::make('Other settings')
+            $components[] = Section::make('Other settings')
                 ->description('Present in the file but not described by this plugin — a newer Minecraft release, or a fork\'s own setting. Edited here as plain text and otherwise left exactly as found.')
                 ->collapsed()
                 ->columns(2)
@@ -225,7 +236,9 @@ class ConfigsPage extends Page implements HasForms
                 ));
         }
 
-        return $schema->components($sections)->statePath('data');
+        return $schema
+            ->components($components)
+            ->statePath('data');
     }
 
     /**
@@ -235,6 +248,7 @@ class ConfigsPage extends Page implements HasForms
     {
         $name = $this->fieldName($key);
         $managed = ! empty($spec['managed_by_panel']);
+        $canEdit = user()?->can(SubuserPermission::FileUpdate, $this->getRecord()) ?? false;
 
         $field = match ($spec['type'] ?? 'string') {
             'bool' => Toggle::make($name),
@@ -264,10 +278,12 @@ class ConfigsPage extends Page implements HasForms
 
         if ($managed) {
             // The panel assigns allocations; letting a player edit the port here
-            // produces a server that binds somewhere the panel will not route to.
+            // yields a server bound somewhere the panel will not route to.
             $field = $field
                 ->disabled()
                 ->helperText('Managed by the panel — change it through the server\'s allocation.');
+        } elseif (! $canEdit) {
+            $field = $field->disabled();
         }
 
         if (! empty($spec['helper']) && ! $managed) {
@@ -277,41 +293,12 @@ class ConfigsPage extends Page implements HasForms
         return $field;
     }
 
-    protected function getHeaderActions(): array
+    /**
+     * The view submits to this (`wire:submit="save"`).
+     */
+    public function save(): void
     {
-        return [
-            Action::make('save')
-                ->label('Save changes')
-                ->icon('tabler-device-floppy')
-                ->keyBindings(['mod+s'])
-                ->requiresConfirmation(fn () => $this->isRunning())
-                ->modalHeading('The server is running')
-                ->modalDescription(trans('minecraft-manager::strings.server_running.warning'))
-                ->modalSubmitActionLabel('Save anyway')
-                ->action(fn (DaemonFileRepository $files) => $this->save($files))
-                ->disabled(fn () => $this->fileMissing),
-
-            Action::make('eula')
-                ->label('Accept the EULA')
-                ->icon('tabler-file-check')
-                ->color('gray')
-                ->visible(fn () => $this->eulaNeedsAccepting())
-                ->requiresConfirmation()
-                ->modalHeading('Accept the Minecraft EULA')
-                ->modalDescription('Writes eula=true to eula.txt. By doing so you agree to the Minecraft End User Licence Agreement at https://aka.ms/MinecraftEULA — the server will not start until this is accepted.')
-                ->action(fn (DaemonFileRepository $files) => $this->acceptEula($files)),
-
-            Action::make('open_files')
-                ->label('File manager')
-                ->icon('tabler-folder-open')
-                ->color('gray')
-                ->url(fn () => ListFiles::getUrl(['path' => '/']), true),
-        ];
-    }
-
-    private function save(DaemonFileRepository $files): void
-    {
-        $server = $this->server();
+        $server = $this->getRecord();
 
         abort_unless(user()?->can(SubuserPermission::FileUpdate, $server), 403);
 
@@ -335,8 +322,8 @@ class ConfigsPage extends Page implements HasForms
 
             $value = $state[$this->fieldName($key)] ?? null;
 
-            // Blank on a write-only field means "leave it alone", exactly as the
-            // plugin's own CurseForge key behaves.
+            // Blank on a write-only field means "leave it alone", the same rule
+            // the plugin's own CurseForge key follows.
             if (! empty($spec['sensitive']) && blank($value)) {
                 continue;
             }
@@ -361,7 +348,9 @@ class ConfigsPage extends Page implements HasForms
         }
 
         try {
-            $files->setServer($server)->putContent('server.properties', $properties->merge($candidate)->render());
+            app(DaemonFileRepository::class)
+                ->setServer($server)
+                ->putContent('server.properties', $properties->merge($candidate)->render());
 
             Activity::event('server:minecraft.config-edit')
                 ->property([
@@ -373,7 +362,7 @@ class ConfigsPage extends Page implements HasForms
                 ->log();
 
             $this->propertiesMemo = null;
-            $this->loadProperties();
+            $this->fillForm();
 
             Notification::make()
                 ->title('server.properties saved')
@@ -391,10 +380,57 @@ class ConfigsPage extends Page implements HasForms
         }
     }
 
+    /**
+     * @return array<int, Action>
+     */
+    protected function getFormActions(): array
+    {
+        return [
+            Action::make('save')
+                ->label('Save changes')
+                ->icon('tabler-device-floppy')
+                ->submit('save')
+                ->keyBindings(['mod+s'])
+                ->disabled(fn () => $this->fileMissing
+                    || ! user()?->can(SubuserPermission::FileUpdate, $this->getRecord())),
+        ];
+    }
+
+    /**
+     * getDefaultHeaderActions, not getHeaderActions.
+     *
+     * ServerFormPage carries CanCustomizeHeaderActions, whose getHeaderActions()
+     * merges actions other plugins registered via registerCustomHeaderActions()
+     * around this method. Overriding getHeaderActions() directly would compile
+     * fine and silently discard every one of them.
+     *
+     * @return array<int, Action>
+     */
+    protected function getDefaultHeaderActions(): array
+    {
+        return [
+            Action::make('eula')
+                ->label('Accept the EULA')
+                ->icon('tabler-file-check')
+                ->color('gray')
+                ->visible(fn () => $this->eulaNeedsAccepting())
+                ->requiresConfirmation()
+                ->modalHeading('Accept the Minecraft EULA')
+                ->modalDescription('Writes eula=true to eula.txt. By doing so you agree to the Minecraft End User Licence Agreement at https://aka.ms/MinecraftEULA — the server will not start until this is accepted.')
+                ->action(fn (DaemonFileRepository $files) => $this->acceptEula($files)),
+
+            Action::make('open_files')
+                ->label('File manager')
+                ->icon('tabler-folder-open')
+                ->color('gray')
+                ->url(fn () => ListFiles::getUrl(['path' => '/']), true),
+        ];
+    }
+
     private function eulaNeedsAccepting(): bool
     {
         try {
-            $contents = app(DaemonFileRepository::class)->setServer($this->server())->getContent('eula.txt', 4096);
+            $contents = app(DaemonFileRepository::class)->setServer($this->getRecord())->getContent('eula.txt', 4096);
         } catch (Throwable) {
             // No eula.txt at all: the server has never run, so there is nothing
             // to accept yet and the button stays hidden.
@@ -406,7 +442,7 @@ class ConfigsPage extends Page implements HasForms
 
     private function acceptEula(DaemonFileRepository $files): void
     {
-        $server = $this->server();
+        $server = $this->getRecord();
 
         abort_unless(user()?->can(SubuserPermission::FileUpdate, $server), 403);
 

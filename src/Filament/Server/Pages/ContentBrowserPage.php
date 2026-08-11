@@ -31,6 +31,7 @@ use FyWolf\MinecraftManager\Support\CapabilityResolver;
 use FyWolf\MinecraftManager\Support\ResolvedProfile;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
+use Throwable;
 
 /**
  * Browse and install mods or plugins.
@@ -53,6 +54,8 @@ class ContentBrowserPage extends Page implements HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = 'tabler-package';
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Minecraft';
+
     protected static ?string $slug = 'mc-content';
 
     protected static ?int $navigationSort = 23;
@@ -60,6 +63,14 @@ class ContentBrowserPage extends Page implements HasTable
     public ?string $provider = null;
 
     public ?string $contentType = null;
+
+    /**
+     * `browse` or `installed`.
+     *
+     * Named $mode, not $view: Filament's Page already uses a $view property for
+     * its Blade template name, and shadowing it stops the page rendering at all.
+     */
+    public string $mode = 'browse';
 
     private ?ResolvedProfile $profileMemo = null;
 
@@ -185,6 +196,146 @@ class ContentBrowserPage extends Page implements HasTable
 
     public function table(Table $table): Table
     {
+        return $this->mode === 'installed'
+            ? $this->installedTable($table)
+            : $this->browseTable($table);
+    }
+
+    /**
+     * What is actually in the mods/plugins directory.
+     *
+     * Reads the directory rather than this plugin's own install history,
+     * because on any real server most mods arrived some other way — by SFTP,
+     * inside a modpack, or from whatever the customer used before this panel.
+     */
+    private function installedTable(Table $table): Table
+    {
+        return $table
+            ->records(function (?string $search) {
+                $installed = app(ContentInstallService::class)->installed($this->server(), $this->profile());
+
+                if ($installed === null) {
+                    return [];
+                }
+
+                if (filled($search)) {
+                    $needle = mb_strtolower($search);
+
+                    $installed = array_filter(
+                        $installed,
+                        fn (array $row) => str_contains(mb_strtolower($row['name']), $needle),
+                    );
+                }
+
+                return $installed;
+            })
+            ->searchable()
+            ->columns([
+                TextColumn::make('name')
+                    ->label('File')
+                    ->weight('bold')
+                    ->searchable()
+                    ->description(fn (array $record) => $record['disabled'] ? 'disabled — the loader ignores this file' : null)
+                    ->color(fn (array $record) => $record['disabled'] ? 'gray' : null),
+
+                TextColumn::make('size')
+                    ->label('Size')
+                    ->formatStateUsing(fn ($state) => $this->humanBytes((int) $state))
+                    ->toggleable(),
+
+                TextColumn::make('modified_at')
+                    ->label('Modified')
+                    ->formatStateUsing(fn ($state) => $state ? Carbon::parse($state, 'UTC')->diffForHumans() : '—')
+                    ->toggleable(),
+            ])
+            ->recordActions([
+                Action::make('toggle')
+                    ->label(fn (array $record) => $record['disabled'] ? 'Enable' : 'Disable')
+                    ->icon(fn (array $record) => $record['disabled'] ? 'tabler-plug' : 'tabler-plug-off')
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (array $record) => ($record['disabled'] ? 'Enable ' : 'Disable ') . $record['name'])
+                    ->modalDescription('Renames the file so the loader stops or starts reading it. Nothing is deleted, and a restart is needed either way.')
+                    ->action(function (array $record) {
+                        $server = $this->server();
+
+                        abort_unless(user()?->can(SubuserPermission::FileUpdate, $server), 403);
+
+                        try {
+                            $to = app(ContentInstallService::class)->toggleInstalled(
+                                $server,
+                                $this->profile(),
+                                $record['name'],
+                                ! $record['disabled'],
+                            );
+
+                            Notification::make()
+                                ->title($record['disabled'] ? 'Enabled' : 'Disabled')
+                                ->body($record['name'] . ' → ' . $to . '. Restart the server to apply.')
+                                ->success()
+                                ->send();
+                        } catch (Throwable $exception) {
+                            report($exception);
+
+                            Notification::make()
+                                ->title('Could not rename the file')
+                                ->body($exception->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+
+                Action::make('lookup')
+                    ->label('Search')
+                    ->icon('tabler-search')
+                    ->color('gray')
+                    // A search, not an identification: the daemon exposes no
+                    // file hash, so the only honest lookup is by a name guessed
+                    // from the filename.
+                    ->tooltip(fn (array $record) => 'Search Modrinth for "' . $record['guess'] . '"')
+                    ->url(fn (array $record) => 'https://modrinth.com/mods?q=' . urlencode($record['guess']), true),
+
+                Action::make('delete')
+                    ->label('Delete')
+                    ->icon('tabler-trash')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (array $record) => 'Delete ' . $record['name'])
+                    ->modalDescription('Removing a mod that others depend on will stop the server booting. Disabling it instead is reversible.')
+                    ->action(function (array $record) {
+                        $server = $this->server();
+
+                        abort_unless(user()?->can(SubuserPermission::FileDelete, $server), 403);
+
+                        try {
+                            app(ContentInstallService::class)->deleteInstalled($server, $this->profile(), $record['name']);
+
+                            Notification::make()
+                                ->title('Deleted')
+                                ->body($record['name'])
+                                ->success()
+                                ->send();
+                        } catch (Throwable $exception) {
+                            report($exception);
+
+                            Notification::make()
+                                ->title('Could not delete the file')
+                                ->body($exception->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+            ])
+            ->headerActions($this->viewSwitchActions())
+            ->emptyStateIcon('tabler-package-off')
+            ->emptyStateHeading('Nothing installed')
+            ->emptyStateDescription(fn () => app(ContentInstallService::class)->installed($this->server(), $this->profile()) === null
+                ? 'The ' . ($this->profile()->contentDir ?? 'content') . ' directory could not be read. It may not exist yet — install something, or start the server once.'
+                : 'Install something from the Browse tab.');
+    }
+
+    private function browseTable(Table $table): Table
+    {
         return $table
             // Only the named table arguments are declared here. Filament's
             // evaluator does inject container bindings elsewhere, but mixing
@@ -249,6 +400,7 @@ class ContentBrowserPage extends Page implements HasTable
             ->recordUrl(fn (array $record) => $record['url'], true)
             ->recordActions([$this->versionsAction()])
             ->headerActions(array_values(array_filter([
+                ...$this->viewSwitchActions(),
                 ...$this->providerSwitchActions(),
                 ...$this->typeSwitchActions(),
                 Action::make('open_folder')
@@ -263,6 +415,50 @@ class ContentBrowserPage extends Page implements HasTable
             ->emptyStateDescription(fn () => $this->activeProvider()
                 ? 'Try a different search term, or switch provider.'
                 : 'No content provider is available. CurseForge needs an API key in the plugin settings.');
+    }
+
+    private function humanBytes(int $bytes): string
+    {
+        $units = ['B', 'KiB', 'MiB', 'GiB'];
+        $index = 0;
+        $value = (float) $bytes;
+
+        while ($value >= 1024 && $index < count($units) - 1) {
+            $value /= 1024;
+            $index++;
+        }
+
+        return round($value, $value >= 100 || $index === 0 ? 0 : 1) . ' ' . $units[$index];
+    }
+
+    /**
+     * Browse / Installed.
+     *
+     * @return array<int, Action>
+     */
+    private function viewSwitchActions(): array
+    {
+        $installedCount = app(ContentInstallService::class)->installedCount($this->server(), $this->profile());
+
+        return [
+            Action::make('view_browse')
+                ->label('Browse')
+                ->badge()
+                ->color(fn () => $this->mode === 'browse' ? 'primary' : 'gray')
+                ->action(function () {
+                    $this->mode = 'browse';
+                    $this->resetTable();
+                }),
+
+            Action::make('view_installed')
+                ->label('Installed' . ($installedCount !== null ? " ($installedCount)" : ''))
+                ->badge()
+                ->color(fn () => $this->mode === 'installed' ? 'primary' : 'gray')
+                ->action(function () {
+                    $this->mode = 'installed';
+                    $this->resetTable();
+                }),
+        ];
     }
 
     /**
