@@ -7,6 +7,11 @@ use App\Models\Role;
 use FyWolf\MinecraftManager\Integrations\Content\ContentProviderRegistry;
 use FyWolf\MinecraftManager\Integrations\Content\CurseForgeProvider;
 use FyWolf\MinecraftManager\Integrations\Content\ModrinthProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\FabricProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\PaperProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\PurpurProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\VanillaProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\VersionProviderRegistry;
 use FyWolf\MinecraftManager\Models\CapabilityProfile;
 use FyWolf\MinecraftManager\Models\EggCapabilityProfile;
 use FyWolf\MinecraftManager\Support\CapabilityResolver;
@@ -45,6 +50,22 @@ class MinecraftManagerProvider extends ServiceProvider
             return (new ContentProviderRegistry())
                 ->register(new ModrinthProvider())
                 ->register(new CurseForgeProvider());
+        });
+
+        // Note the absence of Forge and NeoForge. They publish an installer
+        // rather than a runnable jar, so there is nothing here that could swap
+        // one — their profiles carry a null version_provider and take the
+        // reinstall path instead. PaperMC's API serves four projects, so one
+        // class is registered under four keys.
+        $this->app->singleton(VersionProviderRegistry::class, function () {
+            return (new VersionProviderRegistry())
+                ->register(new VanillaProvider())
+                ->register(new PaperProvider('paper'))
+                ->register(new PaperProvider('folia'))
+                ->register(new PaperProvider('velocity'))
+                ->register(new PaperProvider('waterfall'))
+                ->register(new PurpurProvider())
+                ->register(new FabricProvider());
         });
     }
 

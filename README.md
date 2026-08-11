@@ -21,11 +21,11 @@ Under construction. What is in the box today:
 | Configuration — typed `server.properties` editor, EULA | **built** |
 | Mod / plugin browser (Modrinth), with dependency resolution | **built** |
 | Mod / plugin browser (CurseForge) | **built** |
-| Version switching | planned |
+| Version switching (jar swap + reinstall) | **built** |
 | Modpack installs | planned |
 
-The sections below describing versions and modpacks document the intended design; those
-pages do not render yet.
+The section below describing modpacks documents the intended design; that page does not
+render yet.
 
 ## Developing
 
