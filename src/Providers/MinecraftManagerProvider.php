@@ -1,0 +1,61 @@
+<?php
+
+namespace FyWolf\MinecraftManager\Providers;
+
+use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\ServiceProvider;
+
+/**
+ * The plugin's only service provider.
+ *
+ * `src/Providers/` MUST stay flat. `Plugin::getProviders()` runs a *recursive*
+ * `File::allFiles()` and builds each class name by concatenating the relative
+ * pathname onto the namespace, so a nested `src/Providers/Foo/Bar.php` becomes
+ * the class string `FyWolf\MinecraftManager\Providers\Foo/Bar` — a forward slash
+ * inside a class name. `class_exists()` returns false and the panel skips it
+ * without a word. Anything that is not a ServiceProvider lives elsewhere:
+ * API clients in `src/Integrations`, helpers in `src/Support`.
+ */
+class MinecraftManagerProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        //
+    }
+
+    public function boot(): void
+    {
+        $this->registerActivityStrings();
+    }
+
+    /**
+     * Teach the activity feed how to render this plugin's events.
+     *
+     * `ActivityLog` renders an entry with
+     * `trans_choice('activity.' . str($event)->replace(':', '.'), …)` — a lookup
+     * in the *root* translation namespace. A plugin's `lang/` directory is
+     * mounted as the namespaced `minecraft-manager::`, which that lookup never
+     * consults, so a `lang/en/activity.php` file here would be ignored and every
+     * event would render as its raw key. `Lang::addLines()` injects into the
+     * root namespace at runtime, which is the only thing that works.
+     */
+    private function registerActivityStrings(): void
+    {
+        Lang::addLines([
+            'activity.server.minecraft.world-archive' => 'Archived the world <b>:world</b> to <b>:archive</b>',
+            'activity.server.minecraft.world-restore' => 'Restored the world <b>:world</b> from <b>:archive</b>',
+            'activity.server.minecraft.world-switch' => 'Changed the active world from <b>:old</b> to <b>:new</b>',
+            'activity.server.minecraft.world-delete' => 'Deleted the world <b>:world</b>',
+            'activity.server.minecraft.world-reset' => 'Reset the world <b>:world</b>',
+            'activity.server.minecraft.config-edit' => 'Edited <b>:file</b> (:changed)',
+            'activity.server.minecraft.eula-accept' => 'Accepted the Minecraft EULA',
+            'activity.server.minecraft.content-install' => 'Installed <b>:name</b> (:version) from :provider into <b>:directory</b>',
+            'activity.server.minecraft.content-delete' => 'Removed <b>:name</b> from <b>:directory</b>',
+            'activity.server.minecraft.version-change' => 'Changed the server version to <b>:version</b> (:mode)',
+            'activity.server.minecraft.modpack-install-start' => 'Started installing the modpack <b>:pack</b> (:version)',
+            'activity.server.minecraft.modpack-install-finish' => 'Finished installing the modpack <b>:pack</b> — :installed of :total files',
+            'activity.server.minecraft.modpack-install-failed' => 'Failed to install the modpack <b>:pack</b>: :error',
+            'activity.server.minecraft.modpack-install-cancel' => 'Cancelled the modpack install <b>:pack</b>',
+        ], 'en');
+    }
+}

@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 0.1.1)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bump version in plugin.json and updater.json
+        run: |
+          jq --arg v "${{ inputs.version }}" '.version = $v' plugin.json > tmp.json && mv tmp.json plugin.json
+          jq --arg v "${{ inputs.version }}" '.["*"].version = $v' updater.json > tmp.json && mv tmp.json updater.json
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add plugin.json updater.json
+          git commit -m "chore: bump version to ${{ inputs.version }}"
+          git push
+      - name: Build release zip
+        run: |
+          mkdir -p /tmp/release/minecraft-manager
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            . /tmp/release/minecraft-manager/
+          cd /tmp/release
+          zip -r minecraft-manager.zip minecraft-manager/
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
+          generate_release_notes: true
+          files: /tmp/release/minecraft-manager.zip
