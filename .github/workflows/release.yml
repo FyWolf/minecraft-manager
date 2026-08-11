@@ -18,6 +18,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Run tests
+        run: php tests/PropertiesFileTest.php
+
       - name: Bump version in plugin.json and updater.json
         run: |
           jq --arg v "${{ inputs.version }}" '.version = $v' plugin.json > tmp.json && mv tmp.json plugin.json
@@ -35,6 +38,7 @@ jobs:
           rsync -a \
             --exclude='.git' \
             --exclude='.github' \
+            --exclude='tests' \
             . /tmp/release/minecraft-manager/
           cd /tmp/release
           zip -r minecraft-manager.zip minecraft-manager/

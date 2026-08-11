@@ -10,6 +10,23 @@ An egg nobody has mapped shows nothing rather than a broken page.
 
 **Author:** FyWolf · **Requires:** Pelican Panel · Filament v4 · PHP 8.2+
 
+## Status
+
+Under construction. What is in the box today:
+
+| Feature | State |
+|---|---|
+| Per-egg capability profiles, admin UI, egg auto-detection | **built** |
+| Worlds — list, archive, restore, switch active, delete/reset | **built** |
+| Configuration — typed `server.properties` editor, EULA | **built** |
+| Mod / plugin browser (Modrinth) | planned |
+| Mod / plugin browser (CurseForge) | planned |
+| Version switching | planned |
+| Modpack installs | planned |
+
+The sections below describing CurseForge, versions and modpacks document the intended
+design; those pages do not render yet.
+
 ---
 
 ## Why the gating is a database table
