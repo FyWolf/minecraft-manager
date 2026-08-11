@@ -151,7 +151,9 @@ class WorldsPage extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(function (WorldService $worlds) {
+            ->records(function () {
+                $worlds = app(WorldService::class);
+
                 try {
                     return collect($worlds->list($this->server(), $this->profile()))
                         ->keyBy('name')

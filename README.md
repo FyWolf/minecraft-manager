@@ -19,13 +19,27 @@ Under construction. What is in the box today:
 | Per-egg capability profiles, admin UI, egg auto-detection | **built** |
 | Worlds — list, archive, restore, switch active, delete/reset | **built** |
 | Configuration — typed `server.properties` editor, EULA | **built** |
-| Mod / plugin browser (Modrinth) | planned |
-| Mod / plugin browser (CurseForge) | planned |
+| Mod / plugin browser (Modrinth), with dependency resolution | **built** |
+| Mod / plugin browser (CurseForge) | **built** |
 | Version switching | planned |
 | Modpack installs | planned |
 
-The sections below describing CurseForge, versions and modpacks document the intended
-design; those pages do not render yet.
+The sections below describing versions and modpacks document the intended design; those
+pages do not render yet.
+
+## Developing
+
+Two checks, both runnable without a panel install (the second needs one):
+
+```
+php tests/PropertiesFileTest.php                  # 41 round-trip assertions
+php tests/verify-imports.php /path/to/panel       # every `use` resolves
+```
+
+The second is worth more than it looks. A mistyped namespace in a Pelican plugin fails
+*silently* — `PluginService` catches the exception, flips the plugin to Errored and moves
+on — so the symptom is a plugin that simply does not appear. This resolves every import
+against a real panel's autoloader in about a second.
 
 ---
 

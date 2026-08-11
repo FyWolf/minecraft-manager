@@ -4,6 +4,9 @@ namespace FyWolf\MinecraftManager\Providers;
 
 use App\Models\Egg;
 use App\Models\Role;
+use FyWolf\MinecraftManager\Integrations\Content\ContentProviderRegistry;
+use FyWolf\MinecraftManager\Integrations\Content\CurseForgeProvider;
+use FyWolf\MinecraftManager\Integrations\Content\ModrinthProvider;
 use FyWolf\MinecraftManager\Models\CapabilityProfile;
 use FyWolf\MinecraftManager\Models\EggCapabilityProfile;
 use FyWolf\MinecraftManager\Support\CapabilityResolver;
@@ -33,6 +36,16 @@ class MinecraftManagerProvider extends ServiceProvider
         // Singleton so the per-egg memo survives across the several components
         // that each ask "what can this server do?" while rendering one page.
         $this->app->singleton(CapabilityResolver::class);
+
+        // Both providers are always registered; the registry filters by
+        // isAvailable(), so CurseForge simply is not there until a key exists.
+        // That single predicate is the whole auto-hide behaviour — no page needs
+        // to know why a provider is missing.
+        $this->app->singleton(ContentProviderRegistry::class, function () {
+            return (new ContentProviderRegistry())
+                ->register(new ModrinthProvider())
+                ->register(new CurseForgeProvider());
+        });
     }
 
     public function boot(): void
