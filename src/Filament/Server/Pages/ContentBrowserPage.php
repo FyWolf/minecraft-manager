@@ -117,6 +117,15 @@ class ContentBrowserPage extends Page implements HasTable
     {
         abort_unless(user()?->can(SubuserPermission::FileRead, $this->server()), 403);
 
+        // Filament runs mount() BEFORE it enforces canAccess(), so a server
+        // whose egg resolves to no profile reaches this code even though the
+        // page is meant to be invisible to it. Without this the next line
+        // throws a TypeError and the user gets a 500 where they should get a
+        // 403.
+        $this->profileMemo = app(CapabilityResolver::class)->for($this->server());
+
+        abort_unless($this->profileMemo?->hasAny(Capability::Mods, Capability::Plugins), 403);
+
         $this->contentType ??= ($this->availableTypes()[0] ?? ContentType::Mod)->value;
         $this->provider ??= $this->registry()->default($this->type())?->key();
     }

@@ -39,7 +39,13 @@ class MinecraftManagerSeeder extends Seeder
         'f0d2f88f-1ff3-42a0-b03f-ac44c5571e6d' => 'vanilla', // Sponge (SpongeVanilla)
     ];
 
-    public function __invoke(): void
+    /**
+     * Signature must match Illuminate\Database\Seeder::__invoke(array $parameters = []),
+     * which the panel calls via `$seeder->__invoke()` during plugin install.
+     *
+     * @param array<mixed> $parameters
+     */
+    public function __invoke(array $parameters = []): void
     {
         $profiles = $this->seedProfiles();
 

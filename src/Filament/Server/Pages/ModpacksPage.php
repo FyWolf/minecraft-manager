@@ -91,6 +91,13 @@ class ModpacksPage extends Page implements HasTable
     {
         abort_unless(user()?->can(SubuserPermission::FileRead, $this->server()), 403);
 
+        // Filament runs mount() before it enforces canAccess(), so this page is
+        // reachable by a server whose egg resolves to no profile. Fail as a 403
+        // rather than letting a null profile surface as a TypeError later.
+        $this->profileMemo = app(CapabilityResolver::class)->for($this->server());
+
+        abort_unless($this->profileMemo?->has(Capability::Modpacks), 403);
+
         $this->provider ??= app(ContentProviderRegistry::class)->default(ContentType::Modpack)?->key();
     }
 

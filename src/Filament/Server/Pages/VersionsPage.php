@@ -85,6 +85,15 @@ class VersionsPage extends ServerFormPage
     protected function authorizeAccess(): void
     {
         abort_unless(user()?->can(SubuserPermission::StartupRead, $this->getRecord()), 403);
+
+        // Filament runs mount() BEFORE it enforces canAccess(), so a server
+        // whose egg resolves to no profile reaches this code even though the
+        // page is meant to be invisible to it. Without this the next line to
+        // touch the profile throws a TypeError and the user gets a 500 where
+        // they should get a 403.
+        abort_unless($this->profileMemo = app(CapabilityResolver::class)->for($this->getRecord()), 403);
+
+        abort_unless($this->profileMemo->has(Capability::Versions), 403);
     }
 
     /**
