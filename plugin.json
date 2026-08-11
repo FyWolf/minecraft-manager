@@ -2,7 +2,7 @@
   "id": "minecraft-manager",
   "name": "Minecraft Manager",
   "author": "FyWolf",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Worlds, configs, versions and mod/modpack installs for Minecraft servers, gated per egg.",
   "category": "plugin",
   "url": "https://github.com/HexalabsHosting/minecraft-manager",
