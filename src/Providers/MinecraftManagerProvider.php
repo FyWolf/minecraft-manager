@@ -133,6 +133,7 @@ class MinecraftManagerProvider extends ServiceProvider
             'activity.server.minecraft.world-reset' => 'Reset the world <b>:world</b>',
             'activity.server.minecraft.config-edit' => 'Edited <b>:file</b> (:changed)',
             'activity.server.minecraft.eula-accept' => 'Accepted the Minecraft EULA',
+            'activity.server.minecraft.config-locked-rejected' => 'Attempted to change locked setting(s) <b>:keys</b> in <b>:file</b>',
             'activity.server.minecraft.content-install' => 'Installed <b>:name</b> (:version) from :provider into <b>:directory</b>',
             'activity.server.minecraft.content-delete' => 'Removed <b>:name</b> from <b>:directory</b>',
             'activity.server.minecraft.content-toggle' => 'Renamed <b>:name</b> in <b>:directory</b> to enable or disable it',

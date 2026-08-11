@@ -7,6 +7,7 @@ use App\Traits\EnvironmentWriterTrait;
 use Filament\Actions\Action;
 use Filament\Contracts\Plugin;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -156,6 +157,21 @@ class MinecraftManagerPlugin implements HasPluginSettings, Plugin
                         ->content('Admin → Minecraft Profiles. Run `php artisan minecraft-manager:sync-profiles` after importing new eggs.'),
                 ]),
 
+            Section::make('Locked settings')
+                ->description('Properties customers can see but not change on the Configuration page.')
+                ->schema([
+                    TagsInput::make('locked_properties')
+                        ->label('Locked server.properties keys')
+                        ->placeholder('max-players')
+                        ->helperText('The usual case is max-players, since on a host that sells slots the player limit belongs to the order rather than to the server. Locked keys stay visible but disabled, and are refused server-side — not merely greyed out in the browser.')
+                        ->default(fn () => (array) config('minecraft-manager.configs.locked_properties', [])),
+
+                    TextInput::make('locked_reason')
+                        ->label('Reason shown to the customer')
+                        ->placeholder('Set by your plan — contact support to change it.')
+                        ->default(fn () => config('minecraft-manager.configs.locked_reason')),
+                ]),
+
             Section::make('Modpacks')
                 ->description('Modpack installs run on a queue worker.')
                 ->schema([
@@ -192,6 +208,8 @@ class MinecraftManagerPlugin implements HasPluginSettings, Plugin
             'curseforge_clear_key' => false,
             'heuristics_enabled' => (bool) config('minecraft-manager.heuristics.enabled', true),
             'packs_queue' => config('minecraft-manager.packs.queue', 'default'),
+            'locked_properties' => (array) config('minecraft-manager.configs.locked_properties', []),
+            'locked_reason' => config('minecraft-manager.configs.locked_reason'),
         ];
     }
 
@@ -200,9 +218,20 @@ class MinecraftManagerPlugin implements HasPluginSettings, Plugin
      */
     public function saveSettings(array $data): void
     {
+        // Property keys contain dots and dashes but never commas, so a comma
+        // separated list round-trips safely through .env. Written even when
+        // empty, since clearing the list is a legitimate change.
+        $locked = collect((array) ($data['locked_properties'] ?? []))
+            ->map(fn ($key) => trim((string) $key))
+            ->filter()
+            ->unique()
+            ->implode(',');
+
         $env = [
             'MCM_HEURISTICS' => ! empty($data['heuristics_enabled']) ? 'true' : 'false',
             'MCM_PACKS_QUEUE' => trim((string) ($data['packs_queue'] ?? '')) ?: 'default',
+            'MCM_LOCKED_PROPERTIES' => $locked,
+            'MCM_LOCKED_REASON' => trim((string) ($data['locked_reason'] ?? '')) ?: 'Set by your plan — contact support to change it.',
         ];
 
         if (! empty($data['curseforge_clear_key'])) {

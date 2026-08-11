@@ -251,10 +251,39 @@ class ConfigsPage extends ServerFormPage
     /**
      * @param array<string, mixed> $spec
      */
+    /**
+     * Whether a property is off-limits to the customer.
+     *
+     * Two sources: the per-key `managed_by_panel` flag (things the panel itself
+     * owns, like the port), and the admin-configurable lock list (things
+     * provisioning owns, like max-players on a host that sells slots).
+     *
+     * Consulted by BOTH the form and save(). The form use is a courtesy; the
+     * save use is the actual enforcement.
+     */
+    private function isLocked(string $key, array $spec = []): bool
+    {
+        if (! empty($spec['managed_by_panel'])) {
+            return true;
+        }
+
+        return in_array($key, (array) config('minecraft-manager.configs.locked_properties', []), true);
+    }
+
+    private function lockReason(string $key, array $spec = []): string
+    {
+        return ! empty($spec['managed_by_panel'])
+            ? 'Managed by the panel — change it through the server\'s allocation.'
+            : (string) config('minecraft-manager.configs.locked_reason', 'Locked by your host.');
+    }
+
+    /**
+     * @param array<string, mixed> $spec
+     */
     private function buildField(string $key, array $spec)
     {
         $name = $this->fieldName($key);
-        $managed = ! empty($spec['managed_by_panel']);
+        $locked = $this->isLocked($key, $spec);
         $canEdit = user()?->can(SubuserPermission::FileUpdate, $this->getRecord()) ?? false;
 
         $field = match ($spec['type'] ?? 'string') {
@@ -283,17 +312,18 @@ class ConfigsPage extends ServerFormPage
                 ->helperText('Leave blank to keep the current value.');
         }
 
-        if ($managed) {
-            // The panel assigns allocations; letting a player edit the port here
-            // yields a server bound somewhere the panel will not route to.
+        if ($locked) {
+            // Shown, not hidden: a greyed field with a reason is far less
+            // confusing than a setting that has silently disappeared.
             $field = $field
                 ->disabled()
-                ->helperText('Managed by the panel — change it through the server\'s allocation.');
+                ->hintIcon('tabler-lock')
+                ->helperText($this->lockReason($key, $spec));
         } elseif (! $canEdit) {
             $field = $field->disabled();
         }
 
-        if (! empty($spec['helper']) && ! $managed) {
+        if (! empty($spec['helper']) && ! $locked) {
             $field = $field->helperText($spec['helper']);
         }
 
@@ -321,12 +351,11 @@ class ConfigsPage extends ServerFormPage
         $definition = $this->schemaDefinition();
 
         $candidate = [];
+        $rejected = [];
+
+        $current = $properties->all();
 
         foreach ($definition as $key => $spec) {
-            if (! empty($spec['managed_by_panel'])) {
-                continue;
-            }
-
             $value = $state[$this->fieldName($key)] ?? null;
 
             // Blank on a write-only field means "leave it alone", the same rule
@@ -335,21 +364,66 @@ class ConfigsPage extends ServerFormPage
                 continue;
             }
 
-            $candidate[$key] = match ($spec['type'] ?? 'string') {
+            $submitted = match ($spec['type'] ?? 'string') {
                 'bool' => $value ? 'true' : 'false',
                 'int' => (string) (int) $value,
                 default => (string) $value,
             };
+
+            // The real enforcement. Disabling the field in the form only stops
+            // an honest browser — Livewire state arrives from the client and can
+            // say anything, so a locked key must be dropped here as well.
+            //
+            // Only counted as an attempt when the submitted value actually
+            // differs from what is on disk; otherwise every save of the page
+            // would report a rejection for every locked field.
+            if ($this->isLocked($key, $spec)) {
+                if (array_key_exists($key, $current) && $current[$key] !== $submitted) {
+                    $rejected[] = $key;
+                }
+
+                continue;
+            }
+
+            $candidate[$key] = $submitted;
         }
 
         foreach ((array) ($state['unknown'] ?? []) as $field => $value) {
-            $candidate[$this->keyFromField($field)] = (string) $value;
+            $key = $this->keyFromField($field);
+
+            // A locked key that the schema does not describe still arrives
+            // through the passthrough section, so it has to be filtered here
+            // too — otherwise locking anything outside the typed schema would
+            // do nothing at all.
+            if ($this->isLocked($key)) {
+                if (array_key_exists($key, $current) && $current[$key] !== (string) $value) {
+                    $rejected[] = $key;
+                }
+
+                continue;
+            }
+
+            $candidate[$key] = (string) $value;
+        }
+
+        // A locked value arriving changed means the form state was edited past
+        // the disabled attribute. Worth recording — it is the only signal a host
+        // gets that someone is probing the limits of their plan.
+        if ($rejected !== []) {
+            Activity::event('server:minecraft.config-locked-rejected')
+                ->property(['file' => 'server.properties', 'keys' => implode(', ', array_unique($rejected))])
+                ->log();
         }
 
         $changed = $properties->changedKeys($candidate);
 
         if ($changed === []) {
-            Notification::make()->title('Nothing to save')->body('No values changed.')->send();
+            Notification::make()
+                ->title('Nothing to save')
+                ->body($rejected === []
+                    ? 'No values changed.'
+                    : implode(', ', array_unique($rejected)) . ' cannot be changed here. ' . $this->lockReason($rejected[0]))
+                ->send();
 
             return;
         }

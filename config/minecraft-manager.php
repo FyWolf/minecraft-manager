@@ -292,6 +292,31 @@ return [
     'configs' => [
         'max_file_size' => 512 * 1024,
 
+        /*
+        | Properties customers must not change.
+        |
+        | The motivating case is `max-players`: on a host that sells slots, the
+        | player limit is a property of the order, not of the server, and a
+        | customer editing it here would silently sell themselves an upgrade.
+        | The same applies to anything else provisioning owns.
+        |
+        | Locked keys are still SHOWN — a greyed field with a reason is far less
+        | confusing than a setting that has silently vanished — but they are
+        | disabled in the form and, more importantly, filtered out server-side
+        | on save. Disabling a Livewire field is a UI courtesy, not enforcement:
+        | the browser can send whatever state it likes.
+        |
+        | Edited from Admin -> Plugins -> Minecraft Manager -> Settings, which
+        | writes MCM_LOCKED_PROPERTIES.
+        */
+        'locked_properties' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('MCM_LOCKED_PROPERTIES', 'max-players')),
+        ))),
+
+        // Shown against a locked field so the customer knows who to ask.
+        'locked_reason' => env('MCM_LOCKED_REASON', 'Set by your plan — contact support to change it.'),
+
         'properties_schema' => [
             // World
             'level-name' => ['type' => 'string', 'group' => 'world', 'default' => 'world'],
