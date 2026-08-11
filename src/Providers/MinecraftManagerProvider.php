@@ -2,6 +2,11 @@
 
 namespace FyWolf\MinecraftManager\Providers;
 
+use App\Models\Egg;
+use App\Models\Role;
+use FyWolf\MinecraftManager\Models\CapabilityProfile;
+use FyWolf\MinecraftManager\Models\EggCapabilityProfile;
+use FyWolf\MinecraftManager\Support\CapabilityResolver;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\ServiceProvider;
 
@@ -20,12 +25,40 @@ class MinecraftManagerProvider extends ServiceProvider
 {
     public function register(): void
     {
-        //
+        // Makes `mc_capability_profile` a first-class model permission, so admin
+        // roles can be granted profile management without full panel access.
+        Role::registerCustomDefaultPermissions('mc_capability_profile');
+        Role::registerCustomModelIcon('mc_capability_profile', 'tabler-cube');
+
+        // Singleton so the per-egg memo survives across the several components
+        // that each ask "what can this server do?" while rendering one page.
+        $this->app->singleton(CapabilityResolver::class);
     }
 
     public function boot(): void
     {
+        $this->registerEggRelation();
         $this->registerActivityStrings();
+    }
+
+    /**
+     * Graft the profile relation onto the panel's own Egg model.
+     *
+     * The same technique player-counter uses for `gameQuery`. Note the relation
+     * name is namespaced enough not to collide with it — two plugins resolving
+     * the same relation name onto Egg would silently fight, last one booted
+     * winning.
+     */
+    private function registerEggRelation(): void
+    {
+        Egg::resolveRelationUsing('mcCapabilityProfile', fn (Egg $egg) => $egg->hasOneThrough(
+            CapabilityProfile::class,
+            EggCapabilityProfile::class,
+            'egg_id',
+            'id',
+            'id',
+            'mc_capability_profile_id',
+        ));
     }
 
     /**
