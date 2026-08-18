@@ -99,16 +99,15 @@ check('recommended is marked', ForgeVersions::label('1.15.2', '31.2.0', $promoti
 check('latest is marked', ForgeVersions::label('1.15.2', '31.2.57', $promotions['1.15.2']), '1.15.2-31.2.57 — latest');
 check('no promotions is fine', ForgeVersions::label('1.15.2', '31.2.4', null), '1.15.2-31.2.4');
 
-echo "\nWhich spelling the egg wants:\n";
-check('a full artifact means full', ForgeVersions::wantsFullArtifact('1.15.2-31.2.4'), true);
-check('a bare build means bare', ForgeVersions::wantsFullArtifact('31.2.4'), false);
-check('empty falls back to full', ForgeVersions::wantsFullArtifact(''), true);
-check('null falls back to full', ForgeVersions::wantsFullArtifact(null), true);
-check('whitespace is not a value', ForgeVersions::wantsFullArtifact('   '), true);
-// The Forge egg's other documented value. It has no dash, so it reads as bare —
-// which is right: an egg whose FORGE_VERSION says "latest" is one that builds
-// the URL itself from the Minecraft version.
-check('a keyword reads as bare', ForgeVersions::wantsFullArtifact('latest'), false);
+echo "\nWhat gets offered to the egg, in preference order:\n";
+// Both spellings are in the wild and the egg's own rules decide. The artifact
+// leads because `65.1.2` alone does not say which Minecraft it is for.
+check('artifact first, bare build second', ForgeVersions::writeCandidates('26.2-65.1.2'), ['26.2-65.1.2', '65.1.2']);
+check('the user\'s example', ForgeVersions::writeCandidates('1.15.2-31.2.4'), ['1.15.2-31.2.4', '31.2.4']);
+check('a multi-dash build keeps its tail', ForgeVersions::writeCandidates('1.12.2-14.23.4.2720-4627'), ['1.12.2-14.23.4.2720-4627', '14.23.4.2720-4627']);
+// Nothing to fall back to, so the one value stands alone rather than being
+// offered twice or split into nonsense.
+check('an unsplittable value offers only itself', ForgeVersions::writeCandidates('latest'), ['latest']);
 
 echo "\n" . str_repeat('-', 40) . "\n";
 echo "$pass passed, $fail failed\n";

@@ -183,31 +183,37 @@ final class ForgeVersions
     }
 
     /**
-     * Whether this egg wants the full artifact string or the bare build.
+     * The values to try writing, best first.
      *
-     * Forge eggs disagree, and both spellings are in the wild: some install
-     * scripts take `FORGE_VERSION=1.15.2-31.2.4` and pass it straight to the
-     * installer URL, others take `FORGE_VERSION=31.2.4` and build the URL from
+     * Forge eggs disagree about what `FORGE_VERSION` holds, and both spellings
+     * are in the wild: some install scripts take `1.15.2-31.2.4` and pass it
+     * straight to the installer URL, others take `31.2.4` and build the URL from
      * the Minecraft version themselves. Writing the wrong one produces a server
      * whose install script 404s.
      *
-     * So it is read off whatever the variable already holds rather than assumed.
-     * A current value carrying a dash is the full form; anything else is bare.
-     * An empty variable falls back to the full form, which is what the artifact
-     * *is* and what the Forge website shows.
+     * **This used to guess, from what the variable already held, and the guess
+     * was wrong.** Forge's profile listed `BUILD_TYPE` alongside `FORGE_VERSION`,
+     * so on an egg whose variables came back in that order the detection read
+     * `recommended`, saw no dash, and concluded the egg wanted bare builds —
+     * writing `65.1.2` for a chosen `26.2-65.1.2`.
      *
-     * This can only be wrong when the variable is empty AND the egg wants the
-     * bare build — and the egg's own rules are validated before the write, with
-     * the rejection now reported rather than swallowed, so that case is loud.
+     * So it no longer guesses. Both spellings are offered to the write path in
+     * preference order and the **egg's own validation rules** decide, which is
+     * the only authority on the question that is never wrong. The artifact leads
+     * because it is unambiguous: `65.1.2` alone does not say which Minecraft it
+     * is for, and an egg with no rules at all should get the form the Forge
+     * website shows.
+     *
+     * @return array<int, string>
      */
-    public static function wantsFullArtifact(?string $currentValue): bool
+    public static function writeCandidates(string $artifact): array
     {
-        $current = trim((string) $currentValue);
+        [$game, $build] = self::split($artifact);
 
-        if ($current === '') {
-            return true;
+        if ($game === null || $build === null) {
+            return [$artifact];
         }
 
-        return self::split($current)[0] !== null;
+        return [$artifact, $build];
     }
 }

@@ -109,7 +109,7 @@ class ForgeProvider extends ApiClient implements LoaderVersionProvider
         return array_keys($this->index());
     }
 
-    public function buildsFor(string $gameVersion, bool $fullArtifact = true): array
+    public function buildsFor(string $gameVersion): array
     {
         $builds = $this->index()[$gameVersion] ?? [];
 
@@ -121,7 +121,7 @@ class ForgeProvider extends ApiClient implements LoaderVersionProvider
 
         return array_map(
             fn (string $build): array => [
-                'value' => $fullArtifact ? ForgeVersions::artifact($gameVersion, $build) : $build,
+                'value' => ForgeVersions::artifact($gameVersion, $build),
                 'label' => ForgeVersions::label($gameVersion, $build, $promotions),
             ],
             $builds,
@@ -136,7 +136,7 @@ class ForgeProvider extends ApiClient implements LoaderVersionProvider
      * build when a Minecraft version has no promotion at all, which is normal
      * for a release Forge is still stabilising.
      */
-    public function defaultBuildFor(string $gameVersion, bool $fullArtifact = true): ?string
+    public function defaultBuildFor(string $gameVersion): ?string
     {
         $promotions = $this->promotions()[$gameVersion] ?? null;
         $builds = $this->index()[$gameVersion] ?? [];
@@ -147,11 +147,11 @@ class ForgeProvider extends ApiClient implements LoaderVersionProvider
 
         foreach ([$promotions['recommended'] ?? null, $promotions['latest'] ?? null] as $candidate) {
             if (is_string($candidate) && in_array($candidate, $builds, true)) {
-                return $fullArtifact ? ForgeVersions::artifact($gameVersion, $candidate) : $candidate;
+                return ForgeVersions::artifact($gameVersion, $candidate);
             }
         }
 
-        return $fullArtifact ? ForgeVersions::artifact($gameVersion, $builds[0]) : $builds[0];
+        return ForgeVersions::artifact($gameVersion, $builds[0]);
     }
 
     public function isAvailable(): bool

@@ -208,7 +208,13 @@ return [
             'version_provider' => null,
             'jar_path' => null,
             'mc_version_variables' => ['MINECRAFT_VERSION', 'MC_VERSION'],
-            'loader_version_variables' => ['FORGE_VERSION', 'BUILD_TYPE'],
+            // BUILD_TYPE is deliberately absent. This list is alternatives for
+            // ONE role — which variable holds the loader version — and
+            // BUILD_TYPE is not a spelling of that, it holds
+            // `recommended`/`latest`. Listing it meant the Forge version was
+            // written into it as well, and that the format detection read
+            // `recommended` and concluded the egg wanted bare builds.
+            'loader_version_variables' => ['FORGE_VERSION'],
         ],
 
         'neoforge' => [
