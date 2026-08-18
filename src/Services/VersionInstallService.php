@@ -148,37 +148,64 @@ class VersionInstallService
      * a core `server:startup.edit` event so the change reads normally in the
      * activity feed rather than as a raw key.
      *
-     * @return array<int, string> the env variable names actually written
+     * **`$loaderVersion` used to be omitted on the reinstall path**, which is the
+     * only path Forge and NeoForge ever take — so `loader_version_variables` was
+     * configured, documented, and never written for the two loaders that have
+     * it. Changing a 1.15.2 server to 1.20.1 left `FORGE_VERSION=31.2.4` behind
+     * and the install script then asked Forge for a build that does not exist
+     * for that Minecraft version.
+     *
+     * @return array{written: array<int, string>, rejected: array<string, string>, matched: array<int, string>}
+     *     `rejected` is env variable => the value the egg refused, and is
+     *     returned rather than logged because the caller has to *say so*: a
+     *     partial write is a server that reinstalls into a state nobody asked
+     *     for, and reporting only the total failure is how that stayed invisible.
+     *     `matched` separates "this egg has no version variable" from "it was
+     *     already set to that", which are both an empty `written`.
      */
-    public function writeVersionVariables(Server $server, ResolvedProfile $profile, string $gameVersion, ?string $buildId = null): array
-    {
-        $written = [];
-
+    public function writeVersionVariables(
+        Server $server,
+        ResolvedProfile $profile,
+        string $gameVersion,
+        ?string $loaderVersion = null,
+    ): array {
         $targets = [];
 
         foreach ($profile->mcVersionVariables as $name) {
             $targets[strtoupper($name)] = $gameVersion;
         }
 
-        if ($buildId !== null) {
+        if ($loaderVersion !== null && $loaderVersion !== '') {
             foreach ($profile->loaderVersionVariables as $name) {
-                $targets[strtoupper($name)] = $buildId;
+                $targets[strtoupper($name)] = $loaderVersion;
             }
         }
+
+        // Resolve and validate everything BEFORE writing anything. Validating as
+        // it went meant a rejected FORGE_VERSION landed after MINECRAFT_VERSION
+        // had already been saved, leaving the server pointing at a Minecraft
+        // version its Forge build does not exist for — a state nobody chose and
+        // which reads, from the startup tab, as though the change worked.
+        $pending = [];
+        $rejected = [];
+        $matched = [];
 
         foreach ($server->variables as $variable) {
             $name = strtoupper((string) $variable->env_variable);
 
-            if (! array_key_exists($name, $targets)) {
+            if (! array_key_exists($name, $targets) || ! $variable->user_editable) {
                 continue;
             }
 
-            if (! $variable->user_editable) {
-                continue;
-            }
+            $matched[] = (string) $variable->env_variable;
 
             $value = (string) $targets[$name];
             $original = $variable->server_value ?? $variable->default_value;
+
+            // Consumed either way: the profile lists alternatives for one role,
+            // not a set to write all of, so the first match wins even when it
+            // needs no change.
+            unset($targets[$name]);
 
             if ((string) $original === $value) {
                 continue;
@@ -190,29 +217,65 @@ class VersionInstallService
             );
 
             if ($validator->fails()) {
-                // A version this egg's rules reject (an enum of allowed
-                // versions, say). Skipping is right — forcing it through would
-                // produce a server that cannot start.
+                // A value this egg's rules reject — an enum of allowed versions,
+                // or a FORGE_VERSION pattern wanting the bare build rather than
+                // the full artifact. Not forcing it through is right; saying
+                // nothing about it was not.
+                $rejected[(string) $variable->env_variable] = $value;
+
                 continue;
             }
 
+            $pending[] = ['variable' => $variable, 'value' => $value, 'original' => $original];
+        }
+
+        if ($rejected !== []) {
+            return ['written' => [], 'rejected' => $rejected, 'matched' => $matched];
+        }
+
+        $written = [];
+
+        foreach ($pending as $write) {
             ServerVariable::query()->updateOrCreate(
-                ['server_id' => $server->id, 'variable_id' => $variable->id],
-                ['variable_value' => $value],
+                ['server_id' => $server->id, 'variable_id' => $write['variable']->id],
+                ['variable_value' => $write['value']],
             );
 
             Activity::event('server:startup.edit')
-                ->property(['variable' => $variable->env_variable, 'old' => $original, 'new' => $value])
+                ->property([
+                    'variable' => $write['variable']->env_variable,
+                    'old' => $write['original'],
+                    'new' => $write['value'],
+                ])
                 ->log();
 
-            $written[] = (string) $variable->env_variable;
-
-            // Only write the first matching candidate per role — the profile
-            // lists alternatives, not a set to write all of.
-            unset($targets[$name]);
+            $written[] = (string) $write['variable']->env_variable;
         }
 
-        return $written;
+        return ['written' => $written, 'rejected' => [], 'matched' => $matched];
+    }
+
+    /**
+     * What `FORGE_VERSION` currently holds, so the right spelling can be written
+     * back — see `ForgeVersions::wantsFullArtifact()` for why eggs disagree.
+     */
+    public function currentLoaderVersion(Server $server, ResolvedProfile $profile): ?string
+    {
+        $candidates = array_map('strtoupper', $profile->loaderVersionVariables);
+
+        foreach ($server->variables as $variable) {
+            if (! in_array(strtoupper((string) $variable->env_variable), $candidates, true)) {
+                continue;
+            }
+
+            $value = trim((string) ($variable->server_value ?? $variable->default_value ?? ''));
+
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     /**

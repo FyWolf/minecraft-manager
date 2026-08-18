@@ -19,10 +19,13 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use FyWolf\MinecraftManager\Enums\Capability;
+use FyWolf\MinecraftManager\Integrations\Versions\LoaderVersionProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\LoaderVersionProviderRegistry;
 use FyWolf\MinecraftManager\Integrations\Versions\VanillaProvider;
 use FyWolf\MinecraftManager\Services\ContentInstallService;
 use FyWolf\MinecraftManager\Services\VersionInstallService;
 use FyWolf\MinecraftManager\Support\CapabilityResolver;
+use FyWolf\MinecraftManager\Support\ForgeVersions;
 use FyWolf\MinecraftManager\Support\ResolvedProfile;
 use Throwable;
 
@@ -106,8 +109,40 @@ class VersionsPage extends ServerFormPage
     {
         $this->form->fill([
             'game_version' => $this->currentVersion(),
+            // Seeded so the select opens on what the server is actually running
+            // rather than empty — an empty required field on a page you only
+            // came to read is a page that looks like it needs an answer.
+            'loader_version' => $this->currentLoaderVersion(),
             'archive_first' => true,
         ]);
+    }
+
+    /**
+     * The loader build the server currently runs, but only when it is one of the
+     * offered options.
+     *
+     * A value the dropdown does not contain would be dropped by Filament on
+     * render and silently become "nothing chosen" — which is fine — but it can
+     * also be the *wrong spelling* for the option list (a bare `31.2.4` against
+     * artifact-form options). Normalising it here means the field either shows
+     * the real current build or shows nothing, never a value that looks chosen
+     * and is not.
+     */
+    private function currentLoaderVersion(): ?string
+    {
+        $loader = $this->loaderVersions();
+        $current = $this->versions()->currentLoaderVersion($this->getRecord(), $this->profile());
+
+        if (! $loader || $current === null) {
+            return null;
+        }
+
+        $offered = array_column(
+            $loader->buildsFor((string) $this->currentVersion(), $this->wantsFullArtifact()),
+            'value',
+        );
+
+        return in_array($current, $offered, true) ? $current : null;
     }
 
     private function profile(): ResolvedProfile
@@ -169,7 +204,11 @@ class VersionsPage extends ServerFormPage
 
                 Placeholder::make('method')
                     ->label('Method')
-                    ->content(fn () => $this->canSwapJar() ? 'Replace the jar' : 'Reinstall'),
+                    ->content(fn () => match (true) {
+                        $this->canSwapJar() => 'Replace the jar',
+                        (bool) $this->loaderVersions() => 'Reinstall — Minecraft and loader version',
+                        default => 'Reinstall',
+                    }),
 
                 Placeholder::make('power')
                     ->label('Server')
@@ -218,25 +257,90 @@ class VersionsPage extends ServerFormPage
     private function reinstallSection(): Section
     {
         $configured = filled($this->profile()->versionProvider);
+        $loader = $this->loaderVersions();
 
         return Section::make('Change version')
             ->description($configured
                 ? 'The version service for this software is unreachable, so the jar cannot be downloaded directly. Changing the version will re-run the egg\'s install script instead.'
                 : 'This software is distributed as an installer rather than a ready-to-run jar, so the version is changed by updating the startup variable and reinstalling.')
-            ->schema([
+            ->columns($loader ? 2 : 1)
+            ->schema(array_values(array_filter([
                 Select::make('game_version')
                     ->label('Minecraft version')
                     ->options(fn () => $this->reinstallVersionOptions())
                     ->searchable()
                     ->required()
+                    // A loader build belongs to one Minecraft version, so the
+                    // one chosen for the previous version is not merely stale —
+                    // it names a build that does not exist.
+                    ->live()
+                    ->afterStateUpdated(fn (Set $set) => $set('loader_version', null))
                     ->helperText('Must be a version this egg\'s install script understands.'),
-            ])
+
+                $loader
+                    ? Select::make('loader_version')
+                        ->label($loader->label() . ' version')
+                        ->options(fn (Get $get) => filled($get('game_version'))
+                            ? collect($loader->buildsFor((string) $get('game_version'), $this->wantsFullArtifact()))
+                                ->mapWithKeys(fn (array $build) => [$build['value'] => $build['label']])
+                                ->all()
+                            : [])
+                        ->searchable()
+                        ->required()
+                        ->helperText('Newest first. "Recommended" is the build ' . $loader->label() . ' itself promotes.')
+                    : null,
+            ])))
             ->footerActions([$this->reinstallAction()]);
     }
 
     /**
-     * Offer the egg's own allowed values when its variable rules constrain
-     * them; otherwise fall back to the Vanilla release manifest.
+     * The loader's own version list, when one exists.
+     *
+     * This is the half that was missing. `version_provider` is null for Forge —
+     * correctly, since it ships an installer and there is no jar to swap — but
+     * the page read that as "there is nothing to choose" and offered Minecraft
+     * versions alone. A Minecraft version is not a Forge version: the top of
+     * that list is currently `26.2`, a Minecraft release, while the value the
+     * egg wants looks like `1.15.2-31.2.4`.
+     */
+    private function loaderVersions(): ?LoaderVersionProvider
+    {
+        if ($this->profile()->loaderVersionVariables === []) {
+            return null;
+        }
+
+        $provider = app(LoaderVersionProviderRegistry::class)->for($this->profile()->loader);
+
+        // Unreachable upstream degrades to the Minecraft-version-only form
+        // rather than an empty required select nobody can get past.
+        return $provider?->isAvailable() ? $provider : null;
+    }
+
+    /**
+     * Whether this egg's loader variable takes `1.15.2-31.2.4` or bare `31.2.4`.
+     *
+     * Read off what it currently holds — both spellings are in the wild and
+     * writing the wrong one produces an install script that 404s. A wrong guess
+     * is now loud rather than silent: the egg's own rules are validated before
+     * the write and a rejection is reported.
+     */
+    private function wantsFullArtifact(): bool
+    {
+        return ForgeVersions::wantsFullArtifact(
+            $this->versions()->currentLoaderVersion($this->getRecord(), $this->profile()),
+        );
+    }
+
+    /**
+     * Which Minecraft versions to offer, most authoritative source first.
+     *
+     * 1. **The egg's own `in:` rule**, when it has one. Nothing else can
+     *    override what the install script will actually accept.
+     * 2. **The loader's supported versions.** Forge builds for 77 Minecraft
+     *    versions, not all of them — offering Mojang's full release list means
+     *    offering versions for which no Forge build has ever existed, and the
+     *    failure only shows up as a broken install log.
+     * 3. **The Vanilla manifest**, for a loader with no version source.
      *
      * @return array<string, string>
      */
@@ -257,6 +361,14 @@ class VersionsPage extends ServerFormPage
                         return array_combine($values, $values);
                     }
                 }
+            }
+        }
+
+        if ($loader = $this->loaderVersions()) {
+            $supported = $loader->gameVersions();
+
+            if ($supported !== []) {
+                return array_combine($supported, $supported);
             }
         }
 
@@ -367,10 +479,18 @@ class VersionsPage extends ServerFormPage
                 abort_unless(user()?->can(SubuserPermission::StartupUpdate, $server), 403);
                 abort_unless(user()?->can(SubuserPermission::SettingsReinstall, $server), 403);
 
-                $gameVersion = (string) ($this->form->getState()['game_version'] ?? '');
+                $state = $this->form->getState();
+                $gameVersion = (string) ($state['game_version'] ?? '');
+                $loaderVersion = (string) ($state['loader_version'] ?? '');
 
                 if ($gameVersion === '') {
                     Notification::make()->title('Choose a version')->warning()->send();
+
+                    return;
+                }
+
+                if ($this->loaderVersions() && $loaderVersion === '') {
+                    Notification::make()->title('Choose a loader version')->warning()->send();
 
                     return;
                 }
@@ -387,13 +507,42 @@ class VersionsPage extends ServerFormPage
                     return;
                 }
 
-                $written = $this->versions()->writeVersionVariables($server, $this->profile(), $gameVersion);
+                $result = $this->versions()->writeVersionVariables(
+                    $server,
+                    $this->profile(),
+                    $gameVersion,
+                    $loaderVersion ?: null,
+                );
 
-                if ($written === []) {
+                // `matched`, not `written`: a version already set to the chosen
+                // value writes nothing, and reinstalling the version you are
+                // already on is a legitimate thing to ask for.
+                if ($result['matched'] === []) {
                     Notification::make()
                         ->title('Could not set the version')
-                        ->body('This egg exposes no editable Minecraft version variable, or it rejected that value.')
+                        ->body('This egg exposes no editable Minecraft version variable.')
                         ->danger()
+                        ->send();
+
+                    return;
+                }
+
+                // Refusing to reinstall on a partial write is the point. Before
+                // this, a rejected FORGE_VERSION was skipped in silence while
+                // MINECRAFT_VERSION went through, the reinstall ran, and the
+                // install script went looking for a Forge build that does not
+                // exist for the new Minecraft version. Stopping here leaves the
+                // server exactly as it was.
+                if ($result['rejected'] !== []) {
+                    $detail = collect($result['rejected'])
+                        ->map(fn (string $value, string $variable) => "$variable = \"$value\"")
+                        ->implode('; ');
+
+                    Notification::make()
+                        ->title('The egg refused that version')
+                        ->body("Nothing was changed and the server was not reinstalled. This egg's rules reject $detail — check what values its startup variables allow.")
+                        ->danger()
+                        ->persistent()
                         ->send();
 
                     return;
@@ -422,7 +571,11 @@ class VersionsPage extends ServerFormPage
                 Activity::event('server:settings.reinstall')->log();
 
                 Activity::event('server:minecraft.version-change')
-                    ->property(['mode' => 'reinstall', 'version' => $gameVersion])
+                    ->property(array_filter([
+                        'mode' => 'reinstall',
+                        'version' => $gameVersion,
+                        'loader_version' => $loaderVersion ?: null,
+                    ]))
                     ->log();
 
                 Notification::make()

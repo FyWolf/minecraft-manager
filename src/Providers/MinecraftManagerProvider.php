@@ -12,6 +12,8 @@ use FyWolf\MinecraftManager\Integrations\Content\ContentProviderRegistry;
 use FyWolf\MinecraftManager\Integrations\Content\CurseForgeProvider;
 use FyWolf\MinecraftManager\Integrations\Content\ModrinthProvider;
 use FyWolf\MinecraftManager\Integrations\Versions\FabricProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\ForgeProvider;
+use FyWolf\MinecraftManager\Integrations\Versions\LoaderVersionProviderRegistry;
 use FyWolf\MinecraftManager\Integrations\Versions\PaperProvider;
 use FyWolf\MinecraftManager\Integrations\Versions\PurpurProvider;
 use FyWolf\MinecraftManager\Integrations\Versions\VanillaProvider;
@@ -86,6 +88,20 @@ class MinecraftManagerProvider extends ServiceProvider
                 ->register(new PaperProvider('waterfall'))
                 ->register(new PurpurProvider())
                 ->register(new FabricProvider());
+        });
+
+        // Where Forge does belong. Having no runnable jar is not the same as
+        // having no versions, and conflating the two is what made the reinstall
+        // path offer Minecraft versions to a Forge server: `26.2` is a release
+        // of Minecraft, not a build of Forge.
+        //
+        // NeoForge is absent for now — its version encodes the Minecraft
+        // version rather than naming it (21.1.x is MC 1.21.1), so mapping the
+        // two needs its own rule and its own test rather than being guessed at
+        // here. It still benefits from the write path being fixed.
+        $this->app->singleton(LoaderVersionProviderRegistry::class, function () {
+            return (new LoaderVersionProviderRegistry())
+                ->register(new ForgeProvider());
         });
     }
 

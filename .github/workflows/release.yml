@@ -43,9 +43,20 @@ jobs:
 
       # Blocks the release rather than shipping a broken parser. server.properties
       # is rewritten in place on a live server; a regression here silently
-      # corrupts a config file rather than failing loudly.
+      # corrupts a config file rather than failing loudly. The same is true of
+      # the Forge index: mis-parsing it offers a version that does not exist and
+      # the only symptom is a failed install script.
+      #
+      # Every test that needs no framework belongs here. Naming them one by one
+      # is how ForgeVersionsTest came to be written and then not run — the glob
+      # picks up the next one automatically.
       - name: Run tests
-        run: php tests/PropertiesFileTest.php
+        run: |
+          set -e
+          for test in tests/*Test.php; do
+            echo "== $test"
+            php "$test"
+          done
 
       # Catches syntax errors the other checks cannot: these files are only ever
       # loaded by a running panel, so a parse error ships silently.
