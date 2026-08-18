@@ -9,6 +9,7 @@ use App\Repositories\Daemon\DaemonFileRepository;
 use FyWolf\MinecraftManager\Integrations\Versions\VersionProvider;
 use FyWolf\MinecraftManager\Integrations\Versions\VersionProviderRegistry;
 use FyWolf\MinecraftManager\Support\ResolvedProfile;
+use FyWolf\MinecraftManager\Support\VersionTargets;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
@@ -155,8 +156,15 @@ class VersionInstallService
      * and the install script then asked Forge for a build that does not exist
      * for that Minecraft version.
      *
+     * `$loaderVersion` may be a list of spellings in preference order — Forge
+     * eggs disagree about whether `FORGE_VERSION` holds `1.15.2-31.2.4` or a
+     * bare `31.2.4`. **The egg's own rules decide, not us.** Guessing from what
+     * the variable already held wrote `65.1.2` for a chosen `26.2-65.1.2`,
+     * because the value it read was `BUILD_TYPE`'s `recommended`.
+     *
+     * @param  string|array<int, string>|null  $loaderVersion
      * @return array{written: array<int, string>, rejected: array<string, string>, matched: array<int, string>}
-     *     `rejected` is env variable => the value the egg refused, and is
+     *     `rejected` is env variable => the spellings the egg refused, and is
      *     returned rather than logged because the caller has to *say so*: a
      *     partial write is a server that reinstalls into a state nobody asked
      *     for, and reporting only the total failure is how that stayed invisible.
@@ -167,19 +175,28 @@ class VersionInstallService
         Server $server,
         ResolvedProfile $profile,
         string $gameVersion,
-        ?string $loaderVersion = null,
+        string|array|null $loaderVersion = null,
     ): array {
-        $targets = [];
+        $loaderCandidates = array_values(array_filter(
+            array_map(fn ($value) => trim((string) $value), (array) $loaderVersion),
+            fn (string $value) => $value !== '',
+        ));
 
-        foreach ($profile->mcVersionVariables as $name) {
-            $targets[strtoupper($name)] = $gameVersion;
-        }
+        // One variable per role, chosen by the profile's declared order — see
+        // VersionTargets for why the egg's own order must not decide it.
+        $editable = [];
 
-        if ($loaderVersion !== null && $loaderVersion !== '') {
-            foreach ($profile->loaderVersionVariables as $name) {
-                $targets[strtoupper($name)] = $loaderVersion;
+        foreach ($server->variables as $variable) {
+            if ($variable->user_editable) {
+                $editable[strtoupper((string) $variable->env_variable)] = $variable;
             }
         }
+
+        $plan = VersionTargets::plan(
+            $profile->mcVersionVariables,
+            $loaderCandidates === [] ? [] : $profile->loaderVersionVariables,
+            array_keys($editable),
+        );
 
         // Resolve and validate everything BEFORE writing anything. Validating as
         // it went meant a rejected FORGE_VERSION landed after MINECRAFT_VERSION
@@ -190,43 +207,41 @@ class VersionInstallService
         $rejected = [];
         $matched = [];
 
-        foreach ($server->variables as $variable) {
-            $name = strtoupper((string) $variable->env_variable);
-
-            if (! array_key_exists($name, $targets) || ! $variable->user_editable) {
-                continue;
-            }
+        foreach ($plan as $name => $role) {
+            $variable = $editable[strtoupper($name)];
 
             $matched[] = (string) $variable->env_variable;
 
-            $value = (string) $targets[$name];
-            $original = $variable->server_value ?? $variable->default_value;
+            $candidates = $role === VersionTargets::ROLE_LOADER ? $loaderCandidates : [$gameVersion];
+            $original = (string) ($variable->server_value ?? $variable->default_value);
 
-            // Consumed either way: the profile lists alternatives for one role,
-            // not a set to write all of, so the first match wins even when it
-            // needs no change.
-            unset($targets[$name]);
-
-            if ((string) $original === $value) {
+            // Already correct in any accepted spelling. Checked across every
+            // candidate so a server already on the bare build is not "changed"
+            // to the artifact form for no reason.
+            if (in_array($original, $candidates, true)) {
                 continue;
             }
 
-            $validator = Validator::make(
-                ['variable_value' => $value],
-                ['variable_value' => $variable->rules ?? []],
-            );
+            $accepted = null;
 
-            if ($validator->fails()) {
-                // A value this egg's rules reject — an enum of allowed versions,
-                // or a FORGE_VERSION pattern wanting the bare build rather than
-                // the full artifact. Not forcing it through is right; saying
-                // nothing about it was not.
-                $rejected[(string) $variable->env_variable] = $value;
+            foreach ($candidates as $candidate) {
+                if ($this->passesRules($variable, $candidate)) {
+                    $accepted = $candidate;
+
+                    break;
+                }
+            }
+
+            if ($accepted === null) {
+                // Every spelling refused. That is a real answer from the egg —
+                // an enum of allowed versions, or a pattern neither form matches
+                // — and it gets reported rather than swallowed.
+                $rejected[(string) $variable->env_variable] = implode(' / ', $candidates);
 
                 continue;
             }
 
-            $pending[] = ['variable' => $variable, 'value' => $value, 'original' => $original];
+            $pending[] = ['variable' => $variable, 'value' => $accepted, 'original' => $original];
         }
 
         if ($rejected !== []) {
@@ -256,19 +271,41 @@ class VersionInstallService
     }
 
     /**
-     * What `FORGE_VERSION` currently holds, so the right spelling can be written
-     * back — see `ForgeVersions::wantsFullArtifact()` for why eggs disagree.
+     * Whether a value satisfies the egg's own rules for this variable.
+     *
+     * Typed loosely because `$server->variables` yields the egg's variables
+     * decorated with the server's value, not `ServerVariable` rows.
+     */
+    private function passesRules(object $variable, string $value): bool
+    {
+        return Validator::make(
+            ['variable_value' => $value],
+            ['variable_value' => $variable->rules ?? []],
+        )->passes();
+    }
+
+    /**
+     * What the loader version variable currently holds.
+     *
+     * Reads the profile's declared order rather than the egg's, which is the
+     * whole point: `FORGE_VERSION` comes before `BUILD_TYPE` in the profile, and
+     * asking the egg's own ordering is how `BUILD_TYPE`'s `recommended` came to
+     * stand in for the Forge version.
      */
     public function currentLoaderVersion(Server $server, ResolvedProfile $profile): ?string
     {
-        $candidates = array_map('strtoupper', $profile->loaderVersionVariables);
+        $plan = VersionTargets::plan(
+            [],
+            $profile->loaderVersionVariables,
+            $server->variables->map(fn ($variable) => (string) $variable->env_variable)->all(),
+        );
 
-        foreach ($server->variables as $variable) {
-            if (! in_array(strtoupper((string) $variable->env_variable), $candidates, true)) {
-                continue;
-            }
+        foreach ($plan as $name => $role) {
+            $variable = $server->variables->first(
+                fn ($candidate) => strtoupper((string) $candidate->env_variable) === strtoupper($name),
+            );
 
-            $value = trim((string) ($variable->server_value ?? $variable->default_value ?? ''));
+            $value = trim((string) ($variable?->server_value ?? $variable?->default_value ?? ''));
 
             if ($value !== '') {
                 return $value;

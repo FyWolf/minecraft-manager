@@ -118,15 +118,15 @@ class VersionsPage extends ServerFormPage
     }
 
     /**
-     * The loader build the server currently runs, but only when it is one of the
-     * offered options.
+     * The loader build the server currently runs, as one of the offered options.
      *
-     * A value the dropdown does not contain would be dropped by Filament on
-     * render and silently become "nothing chosen" — which is fine — but it can
-     * also be the *wrong spelling* for the option list (a bare `31.2.4` against
-     * artifact-form options). Normalising it here means the field either shows
-     * the real current build or shows nothing, never a value that looks chosen
-     * and is not.
+     * The options are artifact-form and the variable may hold either spelling,
+     * so a bare `65.1.2` is matched back to the `26.2-65.1.2` option rather than
+     * left unselected — a server that plainly *has* a Forge version showing an
+     * empty field reads as though the page could not see it.
+     *
+     * Anything that matches nothing offered shows as unselected, which is right:
+     * better an empty field than one that looks chosen and is not.
      */
     private function currentLoaderVersion(): ?string
     {
@@ -137,12 +137,15 @@ class VersionsPage extends ServerFormPage
             return null;
         }
 
-        $offered = array_column(
-            $loader->buildsFor((string) $this->currentVersion(), $this->wantsFullArtifact()),
-            'value',
-        );
+        $game = (string) $this->currentVersion();
 
-        return in_array($current, $offered, true) ? $current : null;
+        foreach ($loader->buildsFor($game) as $build) {
+            if (in_array($current, ForgeVersions::writeCandidates($build['value']), true)) {
+                return $build['value'];
+            }
+        }
+
+        return null;
     }
 
     private function profile(): ResolvedProfile
@@ -281,7 +284,7 @@ class VersionsPage extends ServerFormPage
                     ? Select::make('loader_version')
                         ->label($loader->label() . ' version')
                         ->options(fn (Get $get) => filled($get('game_version'))
-                            ? collect($loader->buildsFor((string) $get('game_version'), $this->wantsFullArtifact()))
+                            ? collect($loader->buildsFor((string) $get('game_version')))
                                 ->mapWithKeys(fn (array $build) => [$build['value'] => $build['label']])
                                 ->all()
                             : [])
@@ -316,20 +319,6 @@ class VersionsPage extends ServerFormPage
         return $provider?->isAvailable() ? $provider : null;
     }
 
-    /**
-     * Whether this egg's loader variable takes `1.15.2-31.2.4` or bare `31.2.4`.
-     *
-     * Read off what it currently holds — both spellings are in the wild and
-     * writing the wrong one produces an install script that 404s. A wrong guess
-     * is now loud rather than silent: the egg's own rules are validated before
-     * the write and a rejection is reported.
-     */
-    private function wantsFullArtifact(): bool
-    {
-        return ForgeVersions::wantsFullArtifact(
-            $this->versions()->currentLoaderVersion($this->getRecord(), $this->profile()),
-        );
-    }
 
     /**
      * Which Minecraft versions to offer, most authoritative source first.
@@ -511,7 +500,13 @@ class VersionsPage extends ServerFormPage
                     $server,
                     $this->profile(),
                     $gameVersion,
-                    $loaderVersion ?: null,
+                    // Both spellings, artifact first. Which one this egg's
+                    // FORGE_VERSION actually takes is decided by its own
+                    // validation rules — the only authority on the question that
+                    // is never wrong. Deciding it here, from what the variable
+                    // happened to hold, is what wrote `65.1.2` for a chosen
+                    // `26.2-65.1.2`.
+                    $loaderVersion === '' ? null : ForgeVersions::writeCandidates($loaderVersion),
                 );
 
                 // `matched`, not `written`: a version already set to the chosen

@@ -34,15 +34,16 @@ interface LoaderVersionProvider
     /**
      * Loader builds for one Minecraft version, newest first.
      *
-     * `value` is what gets written to the startup variable and `label` is what
-     * the dropdown shows. They differ because some eggs want the full artifact
-     * (`1.15.2-31.2.4`) and some want the bare build (`31.2.4`), while the label
-     * always shows the artifact — that is the string somebody is matching
-     * against the Forge website.
+     * `value` is the **full artifact** (`1.15.2-31.2.4`), always. Some eggs want
+     * the bare build instead, but that is not this method's problem: which
+     * spelling to write is decided at write time by the egg's own validation
+     * rules. This used to take a flag and pick a spelling here, and choosing it
+     * this far from the egg is exactly how `26.2-65.1.2` got written as
+     * `65.1.2`.
      *
      * @return array<int, array{value: string, label: string}>
      */
-    public function buildsFor(string $gameVersion, bool $fullArtifact = true): array;
+    public function buildsFor(string $gameVersion): array;
 
     /** Whether the upstream answered at all — an empty list is not the same as "no builds". */
     public function isAvailable(): bool;
