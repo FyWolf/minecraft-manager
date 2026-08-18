@@ -101,6 +101,66 @@ abstract class ApiClient
     }
 
     /**
+     * GET a document that is not JSON, or null if anything went wrong.
+     *
+     * Forge publishes its version index as a maven `maven-metadata.xml` and has
+     * no JSON equivalent listing every build — `promotions_slim.json` carries
+     * two builds per Minecraft version, not the 5041 the index holds. So the
+     * text path exists rather than the provider reaching for Http directly and
+     * losing the User-Agent, the breaker and the cache-successes-only rule that
+     * this class exists to enforce.
+     */
+    protected function getText(string $path): ?string
+    {
+        if ($this->isMarkedDown()) {
+            return null;
+        }
+
+        try {
+            // acceptJson() is set on the shared request; an XML endpoint that
+            // honours it would answer 406, so it is overridden here.
+            $response = $this->request()->withHeaders(['Accept' => '*/*'])->get($path);
+        } catch (Throwable $exception) {
+            $this->markDown('connection');
+
+            Log::warning('minecraft-manager: ' . $this->key() . ' unreachable', [
+                'path' => $path,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if ($response->status() === 429) {
+            $retryAfter = (int) $response->header('Retry-After');
+
+            $this->markDown('rate-limited', max(5, min($retryAfter ?: 60, 300)));
+
+            return null;
+        }
+
+        if ($response->failed()) {
+            Log::warning('minecraft-manager: ' . $this->key() . ' request failed', [
+                'path' => $path,
+                'status' => $response->status(),
+            ]);
+
+            if ($response->serverError()) {
+                $this->markDown('server-error');
+            }
+
+            return null;
+        }
+
+        $body = $response->body();
+
+        // An empty 200 is a failure wearing a success's clothes: caching it
+        // would serve an empty version list for the whole TTL, which reads as
+        // "Forge has no versions" rather than as an outage.
+        return trim($body) === '' ? null : $body;
+    }
+
+    /**
      * @param array<string, mixed> $payload
      *
      * @return array<mixed>|null

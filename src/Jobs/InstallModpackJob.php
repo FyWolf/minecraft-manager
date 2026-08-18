@@ -179,7 +179,20 @@ class InstallModpackJob implements ShouldBeUnique, ShouldQueue
                 $profile = $resolver->for($server);
 
                 if ($profile) {
-                    $versions->writeVersionVariables($server, $profile, $manifest->mcVersion, $manifest->loaderVersion);
+                    $result = $versions->writeVersionVariables($server, $profile, $manifest->mcVersion, $manifest->loaderVersion);
+
+                    // A pack whose loader version the egg refuses installs its
+                    // mods against a loader the server is not running. Every
+                    // file reports 'ok' and the pack does not work, which is the
+                    // hardest kind of failure to be handed — so it goes in the
+                    // log the operator already reads.
+                    foreach ($result['rejected'] as $variable => $value) {
+                        $log[] = [
+                            'path' => $variable,
+                            'status' => 'failed',
+                            'reason' => "The egg rejected \"$value\". Set $variable by hand before starting the server.",
+                        ];
+                    }
                 }
             }
 

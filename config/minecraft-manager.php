@@ -51,6 +51,7 @@ return [
     'cache' => [
         'search' => 900,        // 15 min
         'versions' => 1800,     // 30 min
+        'forge_index' => 21600, // 6 h — 200 KB and a handful of new builds a week
         'immutable' => 86400,   // 24 h — anything addressed by an immutable id
         'unavailable' => 60,    // negative cache so a dead API isn't re-probed per request
         'directory' => 30,      // daemon directory listings
@@ -389,6 +390,14 @@ return [
         'purpur_url' => env('MCM_PURPUR_URL', 'https://api.purpurmc.org/v2'),
         'fabric_url' => env('MCM_FABRIC_URL', 'https://meta.fabricmc.net/v2'),
         'vanilla_manifest' => env('MCM_VANILLA_MANIFEST', 'https://launchermeta.mojang.com/mc/game/version_manifest_v2.json'),
+
+        // Forge. The maven index is the only document listing every build — the
+        // promotions file carries two per Minecraft version — and it is the one
+        // that publishes them in the `1.15.2-31.2.4` form the egg's
+        // FORGE_VERSION takes. Promotions is overlaid on top to mark which build
+        // Forge itself recommends.
+        'forge_metadata' => env('MCM_FORGE_METADATA', 'https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml'),
+        'forge_promotions' => env('MCM_FORGE_PROMOTIONS', 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json'),
 
         'default_jar' => 'server.jar',
 
